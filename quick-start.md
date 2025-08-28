@@ -131,7 +131,16 @@ PUT /conversations/{conversation_id}/topic
 
 ## Authentication
 
-### **JWT Token Requirements**
+### **Development vs Production Authentication**
+
+| Mode | Authentication | Client ID Source | JWT Validation |
+|------|----------------|------------------|----------------|
+| **Development** | Bypassed | Hardcoded `'clientid'` | None |
+| **Production** | Full OIDC/JWT | JWT claim `username` | NGINX validation |
+
+**Important**: In development mode (`ng serve` + direct FastAPI), JWT authentication is completely bypassed for easier development and testing.
+
+### **JWT Token Requirements (Production Only)**
 
 ```javascript
 // Request headers
@@ -249,8 +258,11 @@ ng serve --verbose
 
 ```bash
 # Terminal 1: Start backend
-export AWS_DEFAULT_REGION=eu-west-1
-export INTERACTIONS_TABLE=chatbot-interactions-dev
+export AWS_REGION=eu-west-1
+export SERVICE_NAME=mb-api-chatbot-mc
+export AWS_PROFILE_NAME=default
+export SERVER_PORT=8083
+export SERVER_RELOAD=true
 uv run python chatbot_api/run.py
 
 # Terminal 2: Start frontend
@@ -258,7 +270,7 @@ cd web
 ng serve --verbose
 ```
 
-The backend will run on `http://localhost:8000` and the frontend on `http://localhost:4200`.
+The backend will run on `http://localhost:8083` and the frontend on `http://localhost:4200`.
 
 ### **Production Deployment**
 

@@ -6,7 +6,46 @@
 
 #### **Required Software**
 
-- **Python 3.13** - Backend runtime
+- **Python 3.1#### **Terminal 1: Backend Server**
+
+```bash
+# Set environment variables
+export AWS_REGION=eu-west-1
+export SERVICE_NAME=mb-api-chatbot-mc
+export AWS_PROFILE_NAME=default
+export UV_INDEX_PRIVATE_REGISTRY_USERNAME=your-username@company.com
+export UV_INDEX_PRIVATE_REGISTRY_PASSWORD=your-enterprise-registry-token
+export SERVER_PORT=8083
+export SSL_CERT_FILE=/path/to/project/cacert.pem
+export SERVER_RELOAD=true
+
+# Start backend with UV
+uv run python chatbot_api/run.py
+```
+
+**Backend will be available at:** `http://localhost:8083`
+
+**API Documentation:** `http://localhost:8083/docs` (Swagger UI)
+
+#### **Terminal 2: Frontend Development Server**
+
+```bash
+# Navigate to web directory
+cd web
+
+# Start Angular development server
+ng serve --verbose
+```
+
+**Frontend will be available at:** `http://localhost:4200`
+
+**Proxy Configuration:** Automatically proxies `/chatbot/api/*` to backend
+
+### **Prerequisites**
+
+#### **Required Software**
+
+- **Python 3.11+** - Backend runtime
 - **UV Package Manager** - Python dependency management (enterprise JFrog repository)
 - **Node.js 22.14+** - Frontend runtime
 - **Angular CLI** - Frontend development tools
@@ -106,6 +145,17 @@ web/proxy.conf.json   # Frontend proxy configuration for local development
 
 ## Running the Application
 
+### **Development Authentication (Important Note)**
+
+**In development mode, JWT authentication is completely bypassed:**
+
+- **No NGINX OIDC**: Direct Angular → FastAPI communication
+- **Hardcoded Client ID**: Uses `'clientid'` from Angular interceptor
+- **No Token Validation**: FastAPI accepts any client ID header
+- **Simplified Flow**: Perfect for development and testing
+
+This means you can develop and test without dealing with OAuth/JWT complexity.
+
 ### **Development Mode (Recommended)**
 
 #### **Terminal 1: Backend Server**
@@ -120,23 +170,9 @@ export SESSIONS_TABLE=chatbot-sessions-dev
 uv run python chatbot_api/run.py
 ```
 
-**Backend will be available at:** `http://localhost:8000`
+**Backend will be available at:** `http://localhost:8083`
 
-**API Documentation:** `http://localhost:8000/docs` (Swagger UI)
-
-#### **Terminal 2: Frontend Development Server**
-
-```bash
-# Navigate to web directory
-cd web
-
-# Start Angular development server
-ng serve --verbose
-```
-
-**Frontend will be available at:** `http://localhost:4200`
-
-**Proxy Configuration:** Automatically proxies `/chatbot/api/*` to backend
+**API Documentation:** `http://localhost:8083/docs` (Swagger UI)
 
 ### **Production Mode**
 
@@ -379,11 +415,11 @@ Both backend and frontend support hot reloading during development:
 
 ```bash
 # Interactive API documentation
-http://localhost:8000/docs          # Swagger UI
-http://localhost:8000/redoc         # ReDoc
+http://localhost:8083/docs          # Swagger UI
+http://localhost:8083/redoc         # ReDoc
 
 # Test API endpoints
-curl -X POST http://localhost:8000/chatbot/api/v1/sessions \
+curl -X POST http://localhost:8083/chatbot/api/v1/sessions \
   -H "Content-Type: application/json" \
   -d '{"clientId": "test-client"}'
 ```
@@ -419,8 +455,8 @@ aws dynamodb scan --table-name chatbot-interactions-dev --max-items 10
 1. **Port Already in Use**
 
    ```bash
-   # Backend (port 8000)
-   lsof -ti:8000 | xargs kill
+   # Backend (port 8083)
+   lsof -ti:8083 | xargs kill
    
    # Frontend (port 4200)
    lsof -ti:4200 | xargs kill
