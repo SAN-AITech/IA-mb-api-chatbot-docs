@@ -155,33 +155,11 @@ This critical security check ensures conversation ownership and prevents unautho
    )
    ```
 
-### **Phase 3: Conversation History Loading** - *[conversation.py#L360-L375](../chatbot_api/services/conversation.py#L360-L375)*
-
-1. **Retrieve Previous Messages**:
-   ```python
-   previous_conversation_items = service_aws.get_conversation(conversation_id)
-   ```
-
-2. **Build Message Chain**:
-   ```python
-   previsous_conversation = []
-   for item in previous_conversation_items:
-       if item.get('guardrailApplied', {}).get('BOOL', False):
-           continue  # Skip blocked content
-       
-       if item.get('author', {}).get('S', '') in ['human', 'retriever']:
-           message = HumanMessage(item.get('message', {}).get('S', ''))
-       else:
-           message = AIMessage(item.get('message', {}).get('S', ''))
-       
-       previsous_conversation.append(message)
-   ```
-
-### **Phase 4: Core Execution Engine (`_execute` Method)** - *[conversation.py#L322-L522](../chatbot_api/services/conversation.py#L322-L522)*
+### **Phase 3: Core Execution Engine (`_execute` Method)** - *[conversation.py#L322-L522](../chatbot_api/services/conversation.py#L322-L522)*
 
 The `_execute` method is the **heart of the entire conversation system**. It orchestrates the AI processing pipeline, handles real-time streaming, and manages database persistence. This method receives the prepared `SessionContext` and `SendSaveMessageRequest` from the `process_user_input` method and executes the complete conversation workflow.
 
-#### **4.1 Method Signature & Initial Setup** - *[conversation.py#L322-L340]*
+#### **3.1 Method Signature & Initial Setup** - *[conversation.py#L322-L340]*
 
 ```python
 async def _execute(
@@ -202,7 +180,7 @@ session_context.response_id = uuid.uuid4().hex       # Unique response identifie
 agent = Agent(self.agent_config, suggestions)        # Initialize LangGraph agent
 ```
 
-#### **4.2 Conversation History Reconstruction** - *[conversation.py#L350-L370]*
+#### **3.2 Conversation History Reconstruction** - *[conversation.py#L350-L370]*
 
 **Critical for Context Continuity**:
 ```python
@@ -230,7 +208,7 @@ for item in previous_conversation_items:
 - **Security Filtering**: Excludes content blocked by guardrails from context
 - **Format Translation**: DynamoDB → LangChain message objects
 
-#### **4.3 Agent State Construction & Telemetry** - *[conversation.py#L375-L395]*
+#### **3.3 Agent State Construction & Telemetry** - *[conversation.py#L375-L395]*
 
 **Build Complete Agent Input**:
 ```python
@@ -256,7 +234,7 @@ metadata = {
 3. **Current Question**: User's new input
 4. **Metadata**: Full tracing context for observability
 
-#### **4.4 Core Agent Streaming Loop** - *[conversation.py#L396-L450]*
+#### **3.4 Core Agent Streaming Loop** - *[conversation.py#L396-L450]*
 
 **The Central Processing Engine**:
 ```python
@@ -275,9 +253,9 @@ with capture_span_context() as capture:
 - **`type == 'values'`**: Complete outputs from LangGraph nodes (classification, retrieval, suggestions)
 - **`type == 'messages'`**: Incremental text chunks for real-time streaming
 
-#### **4.5 Multi-Modal Response Processing**
+#### **3.5 Multi-Modal Response Processing**
 
-**4.5.1 Contact Center Classification** - *[conversation.py#L398-L415]*:
+**3.5.1 Contact Center Classification** - *[conversation.py#L398-L415]*:
 ```python
 if not cc_answer and 'contact_center_answer' in value:
     cc_answer = value['contact_center_answer'].answer
@@ -292,7 +270,7 @@ if not cc_answer and 'contact_center_answer' in value:
         return  # Stop processing, transfer initiated
 ```
 
-**4.5.2 Deep Links Processing** - *[conversation.py#L426-L436]*:
+**3.5.2 Deep Links Processing** - *[conversation.py#L426-L436]*:
 ```python
 if not deep_links and 'deep_links' in value and value['deep_links']:
     deep_links = value['deep_links']
@@ -306,7 +284,7 @@ if not deep_links and 'deep_links' in value and value['deep_links']:
     )
 ```
 
-**4.5.3 Suggestions Processing** - *[conversation.py#L437-L447]*:
+**3.5.3 Suggestions Processing** - *[conversation.py#L437-L447]*:
 ```python
 if not suggestions_answer and 'suggestions' in value and value['suggestions'].followup_questions:
     suggestions_answer = value['suggestions']
@@ -320,7 +298,7 @@ if not suggestions_answer and 'suggestions' in value and value['suggestions'].fo
     )
 ```
 
-#### **4.6 Real-Time Text Streaming** - *[conversation.py#L451-L470]*
+#### **3.6 Real-Time Text Streaming** - *[conversation.py#L451-L470]*
 
 **Content Chunking & Streaming**:
 ```python
@@ -344,9 +322,9 @@ if self.agent_config.DisableContactCenter or cc_answer:
         )
 ```
 
-#### **4.7 Database Persistence Pipeline** - *[conversation.py#L473-L520]*
+#### **3.7 Database Persistence Pipeline** - *[conversation.py#L473-L520]*
 
-**4.7.1 User Message Storage**:
+**3.7.1 User Message Storage**:
 ```python
 service_aws.create_interaction(
     session_context=session_context,
@@ -357,7 +335,7 @@ service_aws.create_interaction(
 )
 ```
 
-**4.7.2 Document Citations Storage**:
+**3.7.2 Document Citations Storage**:
 ```python
 documents = final_state.get('documents', [])
 if len(documents) > 0:
@@ -387,7 +365,7 @@ if len(documents) > 0:
     )
 ```
 
-**4.7.3 AI Response Storage**:
+**3.7.3 AI Response Storage**:
 ```python
 service_aws.create_interaction(
     session_context=session_context,
@@ -398,7 +376,7 @@ service_aws.create_interaction(
 )
 ```
 
-#### **4.8 Response Finalization** - *[conversation.py#L510-L522]*
+#### **3.8 Response Finalization** - *[conversation.py#L510-L522]*
 
 **Complete Stream Closure**:
 ```python
@@ -420,7 +398,7 @@ yield json.dumps(
 )
 ```
 
-#### **4.9 Error Handling & Recovery**
+#### **3.9 Error Handling & Recovery**
 
 **Comprehensive Exception Management**:
 ```python
@@ -438,161 +416,79 @@ except Exception as e:
 - **Complete Telemetry**: Full error context captured
 - **Graceful Degradation**: Partial responses still delivered when possible
 
-### **Phase 5: Real-Time Response Streaming** - *[conversation.py#L390-L470](../chatbot_api/services/conversation.py#L390-L470)*
+### **Phase 4: Database Status Update Mechanism** - *[aws.py#L49-L95](../chatbot_api/services/aws.py#L49-L95)*
 
-#### **5.1 Contact Center Classification**
+The database persistence that occurs within the `_execute` method relies on sophisticated DynamoDB operations that maintain conversation integrity and sequence.
+
+#### **4.1 Get Next Message ID**:
 ```python
-if 'contact_center_answer' in value:
-    cc_answer = value['contact_center_answer'].answer
-    if cc_answer == 'AGENT':
-        # Transfer to human agent
-        yield SendMessageToAgentResponse.build_transfer_to_agent_response()
-        return
+def create_interaction(self, session_context: SessionContext, message: str, ...):
+    # Reuse get_conversation_last_interaction to maintain sequence
+    response = self.get_conversation_last_interaction(session_context.conversation_id)
+    if response:
+        max_message_id = int(response['messageId']['N'])    # Get current max ID
+        topic = response.get('topic', {}).get('S', '')      # Preserve existing topic
+    else:
+        max_message_id = 0                                  # First interaction in conversation
+        topic = None
 ```
 
-#### **5.2 Content Streaming**
+#### **4.2 Build DynamoDB Item**:
 ```python
-if isinstance(chunk.content, str):
-    chunk = chunk.content
-else:
-    chunk = ''.join([c.get('text', '') for c in chunk.content])
-
-total_message += chunk
-
-if chunk and is_streaming:
-    yield SendMessageToAgentResponse.build_send_conversation_response(
-        chunk, session_context, DELTA_STATE
-    )
+item = {
+    'conversationId': {'S': session_context.conversation_id},  # Partition key
+    'messageId': {'N': str(max_message_id + 1)},             # Sort key (auto-increment)
+    'interactionId': {'S': session_context.interaction_id},   # Unique interaction ID
+    'author': {'S': author},                                 # human, ai, retriever
+    'message': {'S': message},                               # Actual message content
+    'createdAt': {'S': datetime.now(timezone.utc).isoformat()},  # Timestamp
+    'responseId': {'S': session_context.response_id},        # Response tracking
+    'guardrailApplied': {'BOOL': guardrail_applied},         # Content safety flag
+    'sessionId': {'S': session_context.session_id}          # Session reference
+}
 ```
 
-#### **5.3 Deep Links Processing**
+#### **4.3 Conditional Data Enrichment**:
 ```python
-if 'deep_links' in value and value['deep_links']:
-    yield SendMessageToAgentResponse.build_deep_links_response(
-        session_context, deep_links, state
-    )
+if topic:
+    item['topic'] = {'S': topic}                   # Preserve conversation topic
+if session_context.client_id:
+    item['clientId'] = {'S': session_context.client_id}  # Client ownership
+
+# Enrich with session analytics data
+if session_context.session_id:
+    session_data = self.get_session(session_context.session_id)
+    if session_data:
+        item['browser'] = session_data['browser']    # User browser info
+        item['device'] = session_data['device']      # Device type
+        item['pageUrl'] = session_data['pageUrl']    # Source page
+        item['channel'] = session_data['channel']    # Communication channel
 ```
 
-#### **5.4 Suggestions Processing**
+#### **4.4 Execute Database Write**:
 ```python
-if 'suggestions' in value and value['suggestions'].followup_questions:
-    yield SendMessageToAgentResponse.build_suggestions_response(
-        session_context, suggestions, state
-    )
+self.dynamodb.put_item(
+    TableName=INTERACTIONS_TABLE,     # COMMONS.INTERACTIONS-TABLE env var
+    Item=item                         # Complete interaction record
+)
 ```
 
-### **Phase 6: Database Persistence** - *[conversation.py#L465-L505](../chatbot_api/services/conversation.py#L465-L505)*
+### **Phase 5: Response Completion** - *[conversation.py#L505-L515](../chatbot_api/services/conversation.py#L505-L515)*
 
-1. **Store User Message with SessionContext**:
-   ```python
-   service_aws.create_interaction(
-       session_context=session_context,  # Full context passed to AWS service
-       message=user_question,
-       author="human",
-       span_id=span_id,
-       guardrail_applied=final_state.get('guardrail_applied', False)
-   )
-   ```
+#### **5.1 Final Event**:
+```python
+yield SendMessageToAgentResponse.build_send_conversation_response(
+    "", session_context, END_STATE
+)
+```
 
-2. **Database Status Update Mechanism** - *[aws.py#L49-L95](../chatbot_api/services/aws.py#L49-L95)*:
-
-   **2.1 Get Next Message ID**:
-   ```python
-   def create_interaction(self, session_context: SessionContext, message: str, ...):
-       # Reuse get_conversation_last_interaction to maintain sequence
-       response = self.get_conversation_last_interaction(session_context.conversation_id)
-       if response:
-           max_message_id = int(response['messageId']['N'])    # Get current max ID
-           topic = response.get('topic', {}).get('S', '')      # Preserve existing topic
-       else:
-           max_message_id = 0                                  # First interaction in conversation
-           topic = None
-   ```
-
-   **2.2 Build DynamoDB Item**:
-   ```python
-   item = {
-       'conversationId': {'S': session_context.conversation_id},  # Partition key
-       'messageId': {'N': str(max_message_id + 1)},             # Sort key (auto-increment)
-       'interactionId': {'S': session_context.interaction_id},   # Unique interaction ID
-       'author': {'S': author},                                 # human, ai, retriever
-       'message': {'S': message},                               # Actual message content
-       'createdAt': {'S': datetime.now(timezone.utc).isoformat()},  # Timestamp
-       'responseId': {'S': session_context.response_id},        # Response tracking
-       'guardrailApplied': {'BOOL': guardrail_applied},         # Content safety flag
-       'sessionId': {'S': session_context.session_id}          # Session reference
-   }
-   ```
-
-   **2.3 Conditional Data Enrichment**:
-   ```python
-   if topic:
-       item['topic'] = {'S': topic}                   # Preserve conversation topic
-   if session_context.client_id:
-       item['clientId'] = {'S': session_context.client_id}  # Client ownership
-   
-   # Enrich with session analytics data
-   if session_context.session_id:
-       session_data = self.get_session(session_context.session_id)
-       if session_data:
-           item['browser'] = session_data['browser']    # User browser info
-           item['device'] = session_data['device']      # Device type
-           item['pageUrl'] = session_data['pageUrl']    # Source page
-           item['channel'] = session_data['channel']    # Communication channel
-   ```
-
-   **2.4 Execute Database Write**:
-   ```python
-   self.dynamodb.put_item(
-       TableName=INTERACTIONS_TABLE,     # COMMONS.INTERACTIONS-TABLE env var
-       Item=item                         # Complete interaction record
-   )
-   ```
-
-3. **SessionContext Usage in AWS Service** - *[aws.py#L55-L85](../chatbot_api/services/aws.py#L55-L85)*:
-   ```python
-   def create_interaction(self, session_context: SessionContext, message: str, ...):
-       item = {
-           'conversationId': {'S': session_context.conversation_id},
-           'interactionId': {'S': session_context.interaction_id},
-           'responseId': {'S': session_context.response_id},
-           'sessionId': {'S': session_context.session_id}
-       }
-       
-       if session_context.client_id:
-           item['clientId'] = {'S': session_context.client_id}
-           
-       # Enrich with session data using session_id from context
-       session_data = self.get_session(session_context.session_id)
-   ```
-
-4. **Store AI Response**:
-   ```python
-   service_aws.create_interaction(
-       session_context=session_context,  # Same context for response tracking
-       message=service_aws.apply_mask_guardrail(total_message),
-       author="ai",
-       span_id=span_id,
-       guardrail_applied=final_state.get('guardrail_applied', False)
-   )
-   ```
-
-### **Phase 7: Response Completion** - *[conversation.py#L505-L515](../chatbot_api/services/conversation.py#L505-L515)*
-
-1. **Final Event**:
-   ```python
-   yield SendMessageToAgentResponse.build_send_conversation_response(
-       "", session_context, END_STATE
-   )
-   ```
-
-2. **Server-Sent Events Return**:
-   ```python
-   return EventSourceResponse(
-       event_generator(),
-       media_type="text/event-stream"
-   )
-   ```
+#### **5.2 Server-Sent Events Return**:
+```python
+return EventSourceResponse(
+    event_generator(),
+    media_type="text/event-stream"
+)
+```
 
 ## SessionContext Complete Journey
 
