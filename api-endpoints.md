@@ -1,3 +1,5 @@
+[← Back to Documentation Home](README.md)
+
 # API Endpoints Documentation
 
 ## Overview

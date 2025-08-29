@@ -1,3 +1,5 @@
+[← Back to Documentation Home](README.md)
+
 # Key Concepts & Terminology
 
 This document defines the essential concepts and terminology used throughout the IA MB API Chatbot system. Understanding these concepts is crucial for working with the system effectively.

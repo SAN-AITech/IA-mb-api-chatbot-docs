@@ -1,3 +1,5 @@
+[← Back to Documentation Home](README.md)
+
 # AWS DynamoDB Exploration Guide
 
 ## Accessing DynamoDB in AWS Console

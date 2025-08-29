@@ -1,3 +1,5 @@
+[← Back to Documentation Home](README.md)
+
 # Quick Start Guide
 
 ## What is IA MB API Chatbot?

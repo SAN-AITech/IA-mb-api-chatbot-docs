@@ -1,3 +1,5 @@
+[← Back to Documentation Home](README.md)
+
 # Database Schema Documentation
 
 ## DynamoDB Tables Structure

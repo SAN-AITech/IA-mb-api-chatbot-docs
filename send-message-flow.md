@@ -1,21 +1,28 @@
+[← Back to Documentation Home](README.md)
+
 # Send Message to Agent - Complete Flow Documentation
 
 ## Overview
 
 The `send_message_to_agent` endpoint is the core functionality of the chatbot API. It processes user messages through a sophisticated AI pipeline using LangGraph, AWS Bedrock, and real-time streaming responses.
 
+**High-Level Flow**: The endpoint receives user input, identifiers, and request parameters. It validates security by looking up the last interaction, builds a comprehensive SessionContext, and then passes both the SendSaveMessageRequest and SessionContext to the core `_execute` method that orchestrates the entire AI conversation workflow.
+
 ## Endpoint Details
 
 **Route**: `POST /conversations/{conversation_id}/messages`  
 **Controller**: [conversation.py#L98](../chatbot_api/controllers/conversation.py#L98)  
-**Service Method**: [conversation.py#L300](../chatbot_api/services/conversation.py#L300)
+**Service Method**: [conversation.py#L251](../chatbot_api/services/conversation.py#L251)  
+**Core Engine**: [conversation.py#L322 (_execute)](../chatbot_api/services/conversation.py#L322)
 
 ## Request Flow Architecture
 
 ```
-User Input → Validation → DB Status Check → LangGraph Processing → Real-time Streaming → Database Storage
-     ↓              ↓            ↓                ↓                     ↓                ↓
-  JSON Request → Headers → Last Interaction → Agent Workflow → Server-Sent Events → DynamoDB
+User Input → Validation → Security Check → Context Building → Core Execution Engine → Real-time Streaming → Database Storage
+     ↓              ↓            ↓              ↓                    ↓                     ↓                ↓
+  JSON Request → Headers → Last Interaction → SessionContext → _execute() Method → Server-Sent Events → DynamoDB
+                                                     ↓
+                                        LangGraph Agent + AWS Bedrock + Knowledge Base
 ```
 
 ## Data Types & Models
@@ -170,41 +177,266 @@ This critical security check ensures conversation ownership and prevents unautho
        previsous_conversation.append(message)
    ```
 
-### **Phase 4: Agent Processing & LangGraph Execution** - *[conversation.py#L330-L390](../chatbot_api/services/conversation.py#L330-L390)*
+### **Phase 4: Core Execution Engine (`_execute` Method)** - *[conversation.py#L322-L522](../chatbot_api/services/conversation.py#L322-L522)*
 
-1. **Agent State Construction**:
-   ```python
-   agent_input = {
-       'messages': [SystemMessage(PROMPT)] + previsous_conversation + [HumanMessage(user_question)],
-       'user_question': user_question,
-   }
-   ```
+The `_execute` method is the **heart of the entire conversation system**. It orchestrates the AI processing pipeline, handles real-time streaming, and manages database persistence. This method receives the prepared `SessionContext` and `SendSaveMessageRequest` from the `process_user_input` method and executes the complete conversation workflow.
 
-2. **Streaming Agent Execution**:
-   ```python
-   async for type, value in agent.astream(agent_input, stream_mode=["messages", "values"]):
-   ```
+#### **4.1 Method Signature & Initial Setup** - *[conversation.py#L322-L340]*
 
-3. **Telemetry Metadata with SessionContext** - *[conversation.py#L376-L385](../chatbot_api/services/conversation.py#L376-L385)*:
-   ```python
-   metadata = {
-       "san": {
-           "conversation_id": session_context.conversation_id,
-           "response_id": session_context.response_id,
-           "interaction_id": session_context.interaction_id,
-           "client_id": session_context.client_id,
-       }
-   }
-   with using_metadata(metadata):
-       # Agent processing with full context tracking
-   ```
+```python
+async def _execute(
+    self,
+    session_context: SessionContext,    # Built context with IDs and metadata
+    request: SendSaveMessageRequest,    # User input and options
+) -> EventSourceResponse:              # Server-Sent Events stream
+```
 
-4. **Multi-Modal Processing**:
-   - **Contact Center Classification**: Determines if human agent needed
-   - **Document Retrieval**: RAG from Knowledge Base
-   - **Response Generation**: LLM content creation
-   - **Suggestions Generation**: Follow-up questions
-   - **Deep Links**: Related resources
+**Key Initialization Steps**:
+```python
+user_question = request.input.text                    # Extract user message
+is_streaming = request.input.options.stream          # Real-time streaming flag
+suggestions = request.input.options.suggestions      # Follow-up questions flag
+session_context.turn_count = int(request.context.system.turnCount) + 1  # Conversation turn tracking
+session_context.response_id = uuid.uuid4().hex       # Unique response identifier
+
+agent = Agent(self.agent_config, suggestions)        # Initialize LangGraph agent
+```
+
+#### **4.2 Conversation History Reconstruction** - *[conversation.py#L350-L370]*
+
+**Critical for Context Continuity**:
+```python
+# Load previous conversation from DynamoDB
+previous_conversation_items = service_aws.get_conversation(conversation_id=session_context.conversation_id)
+previsous_conversation = []
+
+for item in previous_conversation_items:
+    # Skip content blocked by AWS Guardrails
+    if item.get('guardrailApplied', {}).get('BOOL', False):
+        continue
+    
+    # Convert DynamoDB items to LangChain message format
+    if item.get('author', {}).get('S', '') in ['human', 'retriever']:
+        message = HumanMessage(item.get('message', {}).get('S', ''))
+    else:
+        message = AIMessage(item.get('message', {}).get('S', ''))
+    
+    previsous_conversation.append(message)
+```
+
+**Why This Matters**:
+- **Context Preservation**: AI maintains conversation memory across turns
+- **Message Chain**: Proper human/AI alternation for optimal LLM performance
+- **Security Filtering**: Excludes content blocked by guardrails from context
+- **Format Translation**: DynamoDB → LangChain message objects
+
+#### **4.3 Agent State Construction & Telemetry** - *[conversation.py#L375-L395]*
+
+**Build Complete Agent Input**:
+```python
+agent_input = {
+    'messages': [SystemMessage(PROMPT)] + previsous_conversation + [HumanMessage(user_question)],
+    'user_question': user_question,
+}
+
+# OpenTelemetry metadata for distributed tracing
+metadata = {
+    "san": {
+        "conversation_id": session_context.conversation_id,
+        "response_id": session_context.response_id,
+        "interaction_id": session_context.interaction_id,
+        "client_id": session_context.client_id,
+    }
+}
+```
+
+**Message Chain Structure**:
+1. **System Prompt**: AI behavior instructions
+2. **Conversation History**: Previous human/AI exchanges  
+3. **Current Question**: User's new input
+4. **Metadata**: Full tracing context for observability
+
+#### **4.4 Core Agent Streaming Loop** - *[conversation.py#L396-L450]*
+
+**The Central Processing Engine**:
+```python
+with capture_span_context() as capture:
+    with using_metadata(metadata):
+        async for type, value in agent.astream(
+            agent_input,
+            stream_mode=["messages", "values"]  # Stream both message chunks and node outputs
+        ):
+            # Process two types of streaming data:
+            # 1. 'messages' - Real-time text chunks for streaming
+            # 2. 'values' - Complete node outputs (contact center, deep links, etc.)
+```
+
+**Dual Stream Processing**:
+- **`type == 'values'`**: Complete outputs from LangGraph nodes (classification, retrieval, suggestions)
+- **`type == 'messages'`**: Incremental text chunks for real-time streaming
+
+#### **4.5 Multi-Modal Response Processing**
+
+**4.5.1 Contact Center Classification** - *[conversation.py#L398-L415]*:
+```python
+if not cc_answer and 'contact_center_answer' in value:
+    cc_answer = value['contact_center_answer'].answer
+    if cc_answer == 'AGENT':
+        # Immediate transfer to human agent
+        yield json.dumps(
+            SendMessageToAgentResponse.build_transfer_to_agent_response(
+                session_context=session_context
+            ).model_dump(),
+            ensure_ascii=False,
+        )
+        return  # Stop processing, transfer initiated
+```
+
+**4.5.2 Deep Links Processing** - *[conversation.py#L426-L436]*:
+```python
+if not deep_links and 'deep_links' in value and value['deep_links']:
+    deep_links = value['deep_links']
+    yield json.dumps(
+        SendMessageToAgentResponse.build_deep_links_response(
+            session_context=session_context, 
+            deeplinks=deep_links, 
+            state=state
+        ).model_dump(),
+        ensure_ascii=False,
+    )
+```
+
+**4.5.3 Suggestions Processing** - *[conversation.py#L437-L447]*:
+```python
+if not suggestions_answer and 'suggestions' in value and value['suggestions'].followup_questions:
+    suggestions_answer = value['suggestions']
+    yield json.dumps(
+        SendMessageToAgentResponse.build_suggestions_response(
+            session_context=session_context, 
+            suggestions=suggestions_answer.followup_questions, 
+            state=state
+        ).model_dump(),
+        ensure_ascii=False,
+    )
+```
+
+#### **4.6 Real-Time Text Streaming** - *[conversation.py#L451-L470]*
+
+**Content Chunking & Streaming**:
+```python
+# Extract text content from various chunk formats
+if isinstance(chunk.content, str):
+    chunk = chunk.content
+else:
+    # Handle multi-part content (e.g., text + metadata)
+    chunk = ''.join([c.get('text', '') if c.get('type','') == 'text' else '' for c in chunk.content])
+
+total_message += chunk  # Accumulate complete response
+
+# Stream only if Contact Center allows and streaming is enabled
+if self.agent_config.DisableContactCenter or cc_answer:
+    if chunk and is_streaming:
+        yield json.dumps(
+            SendMessageToAgentResponse.build_send_conversation_response(
+                chunk, session_context, DELTA_STATE
+            ).model_dump(),
+            ensure_ascii=False,
+        )
+```
+
+#### **4.7 Database Persistence Pipeline** - *[conversation.py#L473-L520]*
+
+**4.7.1 User Message Storage**:
+```python
+service_aws.create_interaction(
+    session_context=session_context,
+    message=user_question,
+    author="human",
+    span_id=span_id,  # OpenTelemetry trace ID
+    guardrail_applied=final_state.get('guardrail_applied', False)
+)
+```
+
+**4.7.2 Document Citations Storage**:
+```python
+documents = final_state.get('documents', [])
+if len(documents) > 0:
+    citations = []
+    document_content = ''
+    for doc in documents:
+        document_content += f"{doc.page_content}\n\n"
+        citations.append((
+            doc.metadata.get('source_metadata', {}).get('x-amz-bedrock-kb-source-uri', ''),
+            doc.metadata.get('source_metadata', {}).get('x-amz-bedrock-kb-document-page-number', 0.0)
+        ))
+    
+    # Store retrieved documents as separate interaction
+    service_aws.create_interaction(
+        session_context=session_context,
+        message=service_aws.apply_mask_guardrail(GUARDRAIL_MASK_ID, GUARDRAIL_MASK_VERSION, document_content),
+        author="retriever",
+        span_id=span_id
+    )
+    
+    # Stream citations to client
+    yield json.dumps(
+        SendMessageToAgentResponse.build_citations_response(
+            session_context=session_context, citations=citations
+        ).model_dump(),
+        ensure_ascii=False,
+    )
+```
+
+**4.7.3 AI Response Storage**:
+```python
+service_aws.create_interaction(
+    session_context=session_context,
+    message=service_aws.apply_mask_guardrail(GUARDRAIL_MASK_ID, GUARDRAIL_MASK_VERSION, total_message),
+    author="ai",
+    span_id=span_id,
+    guardrail_applied=final_state.get('guardrail_applied', False)
+)
+```
+
+#### **4.8 Response Finalization** - *[conversation.py#L510-L522]*
+
+**Complete Stream Closure**:
+```python
+# Send final response if not streaming
+if not is_streaming:
+    yield json.dumps(
+        SendMessageToAgentResponse.build_send_conversation_response(
+            total_message, session_context, DELTA_STATE
+        ).model_dump(),
+        ensure_ascii=False,
+    )
+
+# Signal conversation completion
+yield json.dumps(
+    SendMessageToAgentResponse.build_send_conversation_response(
+        "", session_context, END_STATE
+    ).model_dump(),
+    ensure_ascii=False,
+)
+```
+
+#### **4.9 Error Handling & Recovery**
+
+**Comprehensive Exception Management**:
+```python
+except Exception as e:
+    logger.error(
+        "Error en la generación de eventos para conversationId: %s",
+        session_context.conversation_id,
+        exc_info=e,
+    )
+    # Graceful degradation - stream continues with error logged
+```
+
+**Key Design Principles**:
+- **Fail-Safe Streaming**: Errors don't crash the entire conversation
+- **Complete Telemetry**: Full error context captured
+- **Graceful Degradation**: Partial responses still delivered when possible
 
 ### **Phase 5: Real-Time Response Streaming** - *[conversation.py#L390-L470](../chatbot_api/services/conversation.py#L390-L470)*
 

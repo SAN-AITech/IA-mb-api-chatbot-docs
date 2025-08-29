@@ -1,3 +1,5 @@
+[← Back to Documentation Home](README.md)
+
 # Memory Management & Chat History
 
 ## How Chat Memory Works
