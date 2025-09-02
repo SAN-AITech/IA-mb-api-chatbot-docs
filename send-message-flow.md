@@ -1,19 +1,44 @@
 [← Back to Documentation Home](README.md)
 
-# Send Message to Agent - Complete Flow Documentation
+# Send Message to Agent - Complete Flow & Database Guide
 
 ## Overview
 
-The `send_message_to_agent` endpoint is the core functionality of the chatbot API. It processes user messages through a sophisticated AI pipeline using LangGraph, AWS Bedrock, and real-time streaming responses.
+The `send_message_to_agent` endpoint is the core functionality of the chatbot API. It processes user messages through a sophisticated AI pipeline using LangGraph, AWS Bedrock, and real-time streaming responses. This comprehensive guide covers the complete flow from API request to database storage, including conversation iteration concepts and database architecture.
 
 **High-Level Flow**: The endpoint receives user input, identifiers, and request parameters. It validates security by looking up the last interaction, builds a comprehensive SessionContext, and then passes both the SendSaveMessageRequest and SessionContext to the core `_execute` method that orchestrates the entire AI conversation workflow.
+
+## Quick Architecture Overview
+
+```text
+User Message → Security Validation → Session Context → Agent Processing → Database Storage → Response
+     ↓              ↓                    ↓                ↓                 ↓              ↓
+ HTTP Request   Client Ownership    Context Building   LangGraph      Message Storage   JSON Response
+```
+
+**Flow Summary**: 
+1. **HTTP Request** arrives with user message and metadata
+2. **Client Ownership** verified through database lookup  
+3. **Context Building** creates comprehensive SessionContext
+4. **LangGraph** processes message through AI pipeline
+5. **Message Storage** persists conversation to DynamoDB
+6. **JSON Response** streams back to user in real-time
 
 ## Endpoint Details
 
 **Route**: `POST /conversations/{conversation_id}/messages`  
-**Controller**: [conversation.py#L98](../chatbot_api/controllers/conversation.py#L98)  
-**Service Method**: [conversation.py#L251](../chatbot_api/services/conversation.py#L251)  
-**Core Engine**: [conversation.py#L322 (_execute)](../chatbot_api/services/conversation.py#L322)
+**Controller**: [conversation.py#L109](../chatbot_api/controllers/conversation.py#L109)  
+**Service Method**: [conversation.py#L259](../chatbot_api/services/conversation.py#L259)  
+**Core Engine**: [conversation.py#L346 (_execute)](../chatbot_api/services/conversation.py#L346)
+
+## 📢 **Recent Changes Notice**
+
+> **⚠️ Important**: This documentation reflects the current codebase version with updated line numbers. Key method locations have changed:
+> - **Controller endpoint**: `send_message_to_agent` now at **L109** (previously L98)
+> - **Service method**: `process_user_input` now at **L259** (previously L251)  
+> - **Core engine**: `_execute` method now at **L346** (previously L322)
+> 
+> All line references in this document have been updated to match the current implementation.
 
 ## Request Flow Architecture
 
@@ -25,68 +50,106 @@ User Input → Validation → Security Check → Context Building → Core Execu
                                         LangGraph Agent + AWS Bedrock + Knowledge Base
 ```
 
-## Data Types & Models
+> **📋 Data Models Reference**: For detailed API request/response models and data structures, see [Request & Response Models Documentation](request-response-models.md)
 
-### 1. **Request Model** - *[send_save_message_request.py](../chatbot_api/domain/requests/send_save_message_request.py)*
+## What is a Conversation Iteration?
 
-```python
-class SendSaveMessageRequest:
-    input: Input                    # Message content and options
-    system: System                  # Channel, timezone, locale info
-    execution: Execution            # Session context identifiers
+### **Definition**
+A **conversation iteration** is one complete turn in a chat conversation, consisting of:
 
-class Input:
-    messageType: str               # Type of message
-    text: str                      # User's actual message
-    options: Options               # Stream and suggestions flags
+1. **User Input** → Stored as `author="human"`
+2. **AI Processing** → LangGraph workflow execution  
+3. **AI Response** → Stored as `author="ai"`
+4. **Optional RAG Data** → Stored as `author="retriever"` (when Knowledge Base is used)
 
-class Options:
-    stream: bool                   # Enable real-time streaming
-    suggestions: bool              # Generate follow-up questions
+### **Iteration Lifecycle Visualization**
+
+```
+┌─────────────────┐     ┌─────────────────┐    ┌─────────────────┐
+│   User Message  │───▶│  AI Processing  │───▶│   AI Response   │
+│   messageId: 1  │     │   (LangGraph)   │    │   messageId: 3  │
+│  author: human  │     │                 │    │   author: ai    │
+└─────────────────┘     └─────────────────┘    └─────────────────┘
+         │                       │                       ▲
+         │              ┌─────────────────┐              │
+         │              │ Retriever Data  │──────────────┘
+         │              │   messageId: 2  │
+         │              │ author:retriever│
+         │              └─────────────────┘
+         │                       │
+         ▼                       ▼
+┌────────────────────────────────────────────────────────────────────┐
+│                    DynamoDB Storage                                │
+│  conversationId: "conv-123"                                        │
+│  ├── messageId: 1, author: "human", message: "What's my balance?"  │
+│  ├── messageId: 2, author: "retriever", message: "Account data..." │
+│  └── messageId: 3, author: "ai", message: "Your balance is $1,234" │
+└────────────────────────────────────────────────────────────────────┘
 ```
 
-### 2. **Response Model** - *[send_message_to_agent_response.py](../chatbot_api/domain/responses/send_message_to_agent_response.py)*
-
-```python
-# Response states for streaming
-INITIAL_STATE = "init"      # First chunk of response
-DELTA_STATE = "delta"       # Incremental content chunks  
-END_STATE = "end"           # Response completion signal
-
-# Response types
-TYPE_TO_AGENT = "toAgent"   # Transfer to human agent
-```
+> **💾 Memory & State Management**: For details on message ID sequencing and turn count management, see [Memory Management Documentation](memory-management.md)
 
 ## Complete Processing Flow
 
-### **Phase 1: Request Validation & Setup** - *[conversation.py#L98-L120](../chatbot_api/controllers/conversation.py#L98-L120)*
+### **Phase 1: Request Validation & Setup** - *[conversation.py#L109-L128](../chatbot_api/controllers/conversation.py#L109-L128)*
 
-1. **Input Validation**:
-   ```python
-   if not request.input.text:
-       raise HTTPException(status_code=400, detail="Message text cannot be empty")
-   ```
+The controller layer is intentionally simple, following clean architecture principles by acting as a pure routing layer.
 
-2. **Header Extraction** - *[header_validator.py](../chatbot_api/controllers/header_validator.py)*:
-   ```python
-   # FastAPI Depends() automatically calls these functions
-   session_id = get_session_id()    # Extracts X-LZVA-SESSION-ID header
-   client_id = get_client_id()      # Extracts x-santander-client-id header
-   ```
+#### **FastAPI Automatic Validation & SendSaveMessageRequest Structure**
 
-3. **Service Layer Call** - *[conversation.py#L115-L125](../chatbot_api/controllers/conversation.py#L115-L125)*:
-   ```python
-   # Controller passes individual parameters to service
-   stream = await conversation_service.process_user_input(
-       client_id, session_id, conversation_id, request
-   )
-   ```
+When a request arrives at the `/conversations/{conversation_id}/messages` endpoint, FastAPI automatically validates the incoming JSON against the `SendSaveMessageRequest` model using Pydantic. This ensures data integrity before any business logic executes.
 
-### **Phase 2: Database Status Validation** - *[conversation.py#L272-L281](../chatbot_api/services/conversation.py#L272-L281)*
+**Complete Request Model Structure** - *See [Request & Response Models](request-response-models.md) for full documentation*:
+
+```python
+class SendSaveMessageRequest(BaseModel):
+    input: Input = Field(default=None)      # Message content and processing options
+    context: Context = Field(default=None)  # Session and system context
+
+class Input(BaseModel):
+    messageType: str = Field(default=None)  # Optional message category
+    text: str                               # Required: User's message content
+    options: Options = Field(default=None)  # Processing configuration
+
+class Options(BaseModel):
+    stream: bool        # Enable real-time streaming response
+    suggestions: bool   # Generate follow-up question suggestions
+
+class Context(BaseModel):
+    execution: Execution = Field(default=None)  # Session identifiers
+    system: System = Field(default=None)        # User environment info
+```
+
+**Key Validation Points**:
+- **`input.text`**: Only required field - the actual user message
+- **`input.options.stream`**: Controls response delivery method (SSE vs HTTP)
+- **`input.options.suggestions`**: Whether to generate follow-up questions
+- **`context.system.turnCount`**: Used for conversation state management
+- **All other fields**: Optional with sensible defaults
+
+#### **Header-Based Dependency Injection**
+
+```python
+client_id: Optional[str] = Depends(get_client_id)      # X-SANTANDER-CLIENT-ID header
+session_id: Optional[str] = Depends(get_session_id)    # X-LZVA-SESSION-ID header
+```
+
+#### **Direct Service Delegation**
+
+```python
+# Controller acts as pure routing layer - no business logic
+return await conversation_service.process_user_input(
+    client_id, session_id, conversation_id, request
+)
+```
+
+**Key Design Decision**: All validation, security checks, and business logic are handled in the service layer, keeping the controller focused solely on HTTP routing.
+
+### **Phase 2: Database Status Validation** - *[conversation.py#L280-L289](../chatbot_api/services/conversation.py#L280-L289)*
 
 This critical security check ensures conversation ownership and prevents unauthorized access.
 
-1. **Retrieve Last Interaction** - *[conversation.py#L272](../chatbot_api/services/conversation.py#L272)*:
+1. **Retrieve Last Interaction** - *[conversation.py#L280](../chatbot_api/services/conversation.py#L280)*:
    ```python
    last_interaction = service_aws.get_conversation_last_interaction(conversation_id)
    ```
@@ -109,7 +172,7 @@ This critical security check ensures conversation ownership and prevents unautho
        return None                                         # No interactions found (new conversation)
    ```
 
-3. **Client Authorization Check** - *[conversation.py#L273-L281](../chatbot_api/services/conversation.py#L273-L281)*:
+3. **Client Authorization Check** - *[conversation.py#L281-L289](../chatbot_api/services/conversation.py#L281-L289)*:
    ```python
    if last_interaction and last_interaction.get('clientId', {}).get('S', '') != client_id:
        logger.warning(
@@ -127,9 +190,9 @@ This critical security check ensures conversation ownership and prevents unautho
    - **Error Handling**: Returns 403 Forbidden for mismatched client IDs
    - **New Conversations**: `None` result allows new conversations to proceed
 
-### **Phase 3: SessionContext Creation** - *[conversation.py#L283-L320](../chatbot_api/services/conversation.py#L283-L320)*
+### **Phase 3: SessionContext Creation** - *[conversation.py#L296-L331](../chatbot_api/services/conversation.py#L296-L331)*
 
-1. **SessionContext Builder Call** - *[conversation.py#L283](../chatbot_api/services/conversation.py#L283)*:
+1. **SessionContext Builder Call** - *[conversation.py#L296](../chatbot_api/services/conversation.py#L296)*:
    ```python
    session_context = self._create_session_context_builder(
        conversation_id,                           # From URL path parameter
@@ -140,7 +203,7 @@ This critical security check ensures conversation ownership and prevents unautho
    )
    ```
 
-2. **SessionContext Construction** - *[conversation.py#L311-L320](../chatbot_api/services/conversation.py#L311-L320)*:
+2. **SessionContext Construction** - *[conversation.py#L327-L345](../chatbot_api/services/conversation.py#L327-L345)*:
    ```python
    return SessionContext(
        zone_id=str(timezone.utc),
@@ -155,11 +218,11 @@ This critical security check ensures conversation ownership and prevents unautho
    )
    ```
 
-### **Phase 3: Core Execution Engine (`_execute` Method)** - *[conversation.py#L322-L522](../chatbot_api/services/conversation.py#L322-L522)*
+### **Phase 3: Core Execution Engine (`_execute` Method)** - *[conversation.py#L346-L616](../chatbot_api/services/conversation.py#L346-L616)*
 
 The `_execute` method is the **heart of the entire conversation system**. It orchestrates the AI processing pipeline, handles real-time streaming, and manages database persistence. This method receives the prepared `SessionContext` and `SendSaveMessageRequest` from the `process_user_input` method and executes the complete conversation workflow.
 
-#### **3.1 Method Signature & Initial Setup** - *[conversation.py#L322-L340]*
+#### **3.1 Method Signature & Initial Setup** - *[conversation.py#L346-L364]*
 
 ```python
 async def _execute(
@@ -473,133 +536,134 @@ self.dynamodb.put_item(
 )
 ```
 
-### **Phase 5: Response Completion** - *[conversation.py#L505-L515](../chatbot_api/services/conversation.py#L505-L515)*
+## Phase 6: Complete Database Table Structure
 
-#### **5.1 Final Event**:
+### **INTERACTIONS_TABLE (Main Storage)**
+
+**Primary Key Design:**
+- **Partition Key**: `conversationId` - Groups all messages in one conversation
+- **Sort Key**: `messageId` - Orders messages chronologically within conversation
+
+**Complete Item Structure:**
 ```python
-yield SendMessageToAgentResponse.build_send_conversation_response(
-    "", session_context, END_STATE
-)
-```
-
-#### **5.2 Server-Sent Events Return**:
-```python
-return EventSourceResponse(
-    event_generator(),
-    media_type="text/event-stream"
-)
-```
-
-## SessionContext Complete Journey
-
-### **Creation Flow:**
-```
-1. Controller Layer (conversation.py#L98-L125):
-   ├── FastAPI extracts headers: session_id, client_id
-   ├── Gets conversation_id from URL path  
-   └── Passes individual parameters to service
-
-2. Service Layer (conversation.py#L283):
-   ├── Calls _create_session_context_builder()
-   ├── Combines all parameters into SessionContext
-   └── Generates new UUIDs for interaction_id, response_id
-
-3. SessionContext Usage Throughout Flow:
-   ├── Telemetry metadata (conversation.py#L376-L385)
-   ├── SSE response events (all streaming chunks)
-   ├── DynamoDB persistence (aws.py#L55-L85)
-   └── Error tracking and logging
-```
-
-### **SessionContext Structure:**
-```python
-SessionContext:
-├── session_id          # From X-LZVA-SESSION-ID header
-├── conversation_id     # From URL path parameter  
-├── client_id           # From x-santander-client-id header
-├── interaction_id      # Generated UUID for this message exchange
-├── response_id         # Generated UUID for AI response
-├── zone_id             # UTC timezone
-├── session_start_time  # Current timestamp
-├── is_streaming        # From request options
-└── virtual_agent_id    # LuzIA_{ENVIRONMENT}
-```
-
-1. **INITIAL_STATE**: First response chunk
-2. **DELTA_STATE**: Incremental content updates
-3. **END_STATE**: Response completion signal
-4. **Deep Links**: Related resource references
-5. **Suggestions**: Follow-up question options
-6. **Citations**: Source document references
-7. **Transfer to Agent**: Human handoff signal
-
-### **Event Format**:
-```json
 {
-  "type": "delta",
-  "responseId": "abc123",
-  "conversationId": "conv456", 
-  "interactionId": "int789",
-  "value": {
-    "input": {
-      "text": "Response chunk content"
-    }
-  }
+    # Primary Keys
+    'conversationId': {'S': 'conversation-uuid'},     # Partition key
+    'messageId': {'N': '1'},                          # Sort key (auto-increment)
+    
+    # Iteration Tracking
+    'interactionId': {'S': 'interaction-uuid'},       # Unique per iteration
+    'responseId': {'S': 'response-uuid'},             # Links user→AI pairs
+    'author': {'S': 'human|ai|retriever'},           # Message type
+    'message': {'S': 'actual message content'},       # The text
+    'createdAt': {'S': '2025-08-28T10:30:00Z'},      # Timestamp
+    
+    # Security & Ownership
+    'clientId': {'S': 'client-identifier'},           # User ownership
+    'sessionId': {'S': 'session-uuid'},              # Session reference
+    'guardrailApplied': {'BOOL': False},              # Content safety
+    
+    # Analytics (from session data)
+    'browser': {'S': 'Chrome 120.0'},                 # User browser
+    'device': {'S': 'Desktop'},                       # Device type
+    'pageUrl': {'S': 'https://bank.com/chat'},        # Source page
+    'channel': {'S': 'web'},                          # Channel type
+    
+    # Conversation Management
+    'topic': {'S': 'Account Balance Inquiry'},        # Conversation title
+    'spanId': {'S': 'telemetry-span-id'},            # Tracing
+    
+    # Feedback System
+    'score': {'N': '5'},                              # User rating (1-5)
+    'scoringType': {'S': 'thumbs_up'},               # Feedback type
+    'scoreMessage': {'S': 'Very helpful!'}            # User comment
 }
 ```
 
-## Error Handling
+### **SESSIONS_TABLE (Metadata Storage)**
 
-### **Validation Errors**:
-- Empty message text → 400 Bad Request
-- Invalid session → Session validation error
+**Primary Key**: `sessionId` (Partition Key)
 
-### **Processing Errors**:
-- LangGraph failures → 409 Conflict
-- AWS service errors → Logged and handled gracefully
-- Guardrail violations → Content blocked and logged
+**Complete Item Structure:**
+```python
+{
+    'sessionId': {'S': 'session-uuid'},               # Partition key
+    'clientId': {'S': 'client-identifier'},           # User reference
+    'createdAt': {'S': '2025-08-28T10:00:00Z'},      # Session start
+    'browser': {'S': 'Chrome 120.0'},                 # Browser info
+    'device': {'S': 'Desktop'},                       # Device type
+    'pageUrl': {'S': 'https://bank.com/chat'},        # Source page
+    'channel': {'S': 'web'},                          # Channel type
+    'spanId': {'S': 'session-telemetry-span'}         # Tracing
+}
+```
 
-## Database Flow Summary
+### **Secondary Indexes**
 
-### **Key Database Operations in send_message_to_agent:**
+**clientId-conversationId-index**: For retrieving user's conversations
+- **Partition Key**: `clientId`
+- **Sort Key**: `conversationId`
 
-1. **Initial Status Check**:
-   - **Method**: `get_conversation_last_interaction(conversation_id)`
-   - **Purpose**: Validates conversation ownership and prevents unauthorized access
-   - **Query**: DynamoDB query with `ScanIndexForward=False, Limit=1` to get latest interaction
-   - **Security**: Compares `clientId` from last interaction with current request client
+## Query Patterns for Conversation Iterations
 
-2. **Message ID Management**:
-   - **Auto-increment**: Each new interaction gets `max_message_id + 1`
-   - **Ordering**: Maintains chronological message sequence within conversations
-   - **Consistency**: Uses last interaction lookup to ensure no gaps in numbering
+### **1. Get Conversation History (All Iterations)**
+```python
+def get_conversation(conversation_id: str):
+    response = dynamodb.query(
+        TableName=INTERACTIONS_TABLE,
+        KeyConditionExpression='conversationId = :id',
+        ExpressionAttributeValues={':id': {'S': conversation_id}},
+        ScanIndexForward=True  # Chronological order
+    )
+    return response.get('Items', [])
+```
 
-3. **Status Updates During Processing**:
-   - **User Message**: Stored immediately after validation with `author="human"`
-   - **AI Response**: Stored after complete LangGraph processing with `author="ai"`
-   - **Retriever Data**: Stored for RAG documents with `author="retriever"`
-   - **Topic Persistence**: Maintains conversation topic across all interactions
+### **2. Get Latest Iteration (Security Check)**
+```python
+def get_conversation_last_interaction(conversation_id: str):
+    response = dynamodb.query(
+        TableName=INTERACTIONS_TABLE,
+        KeyConditionExpression='conversationId = :id',
+        ExpressionAttributeValues={':id': {'S': conversation_id}},
+        ScanIndexForward=False,  # Latest first
+        Limit=1
+    )
+    return response.get('Items', [None])[0]
+```
 
-4. **Data Enrichment Process**:
-   - **Session Context**: All interactions linked to SessionContext for tracking
-   - **Client Metadata**: Browser, device, page URL, channel from session data
-   - **Telemetry Integration**: Span IDs for distributed tracing
-   - **Guardrail Status**: Content safety validation results
+### **3. Get User's Conversation List**
+```python
+def get_conversations(client_id: str):
+    response = dynamodb.query(
+        TableName=INTERACTIONS_TABLE,
+        IndexName='clientId-conversationId-index',
+        KeyConditionExpression='clientId = :client',
+        FilterExpression='attribute_exists(topic)',
+        ExpressionAttributeValues={':client': {'S': client_id}}
+    )
+    return response.get('Items', [])
+```
 
-### **Update Mechanisms Available:**
+## Performance Characteristics
 
-- **`create_interaction()`**: Adds new messages/responses to conversation
-- **`update_interaction()`**: Modifies existing interaction properties (e.g., topic)
-- **Topic Management**: Can add/remove conversation topics dynamically
-- **Conversation Deletion**: Removes topic from all interactions (soft delete)
+### **Write Patterns**
+- **Hot Partitions**: Active conversations get frequent writes
+- **Sequential Writes**: messageId auto-increment creates predictable access
+- **Atomic Operations**: Each message write is independent
 
-## Performance Considerations
+### **Read Patterns**
+- **Latest First**: Security checks read most recent interaction
+- **Full History**: Conversation loading reads entire history  
+- **User Lists**: Index queries for conversation discovery
 
-1. **Streaming**: Real-time user experience with Server-Sent Events
-2. **Memory Management**: Conversation history loading and LangGraph state
-3. **Database Efficiency**: Batched writes and optimized queries
-4. **Caching**: Session context and configuration caching
-5. **Monitoring**: Distributed tracing with span IDs
+### **Scaling Considerations**
+```python
+# Auto-scaling based on:
+# - Read Capacity: Conversation history requests
+# - Write Capacity: New message frequency
+# - Storage: Message content and metadata growth
+# - Hot Partitions: Popular conversation activity
+```
 
 ## Integration Points
 

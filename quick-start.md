@@ -310,7 +310,7 @@ GET /health/database
 2. **Backend**: `uv run python chatbot_api/run.py`
 3. **Frontend**: `cd web && ng serve --verbose`
 4. **Read**: [Architecture Overview](architecture-overview.md) - System design
-5. **Understand**: [Conversation Flow](conversation-flow.md) - Message processing
+5. **Understand**: [Send Message Flow](send-message-flow.md) - Complete message processing and database guide
 6. **Explore**: [Database Architecture](database-architecture.md) - Data design
 
 ### **For Operations**

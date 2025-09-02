@@ -74,3 +74,36 @@ aws_service.create_interaction(session_context, response)
 - **Scalable**: DynamoDB handles multiple concurrent conversations
 - **Context-Aware**: LLM has access to full conversation history
 - **Stateless API**: Each request is independent but context-aware
+
+## Message ID Sequencing
+
+Every message gets an auto-incremented `messageId` within a conversation:
+
+```python
+# From aws.py - Lines 55-62
+response = self.get_conversation_last_interaction(session_context.conversation_id)
+if response:
+    max_message_id = int(response['messageId']['N'])    # Get current maximum
+    topic = response.get('topic', {}).get('S', '')      # Preserve topic
+else:
+    max_message_id = 0                                  # New conversation
+    topic = None
+
+# New message gets: max_message_id + 1
+```
+
+This ensures proper message ordering and prevents conflicts in multi-user environments.
+
+## Turn Count Management
+
+```python
+# In conversation.py - Line 342
+session_context.turn_count = int(request.context.system.turnCount) + 1
+```
+
+Each iteration increments the turn count, allowing the system to:
+
+- Track conversation length
+- Apply policies based on interaction depth  
+- Monitor conversation engagement patterns
+- Implement turn-based limitations if needed
