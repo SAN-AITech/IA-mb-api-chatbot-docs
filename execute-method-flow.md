@@ -291,151 +291,170 @@ This enables intelligent routing (like transferring to human agents) while maint
 
 ### **Phase 6A: Values Stream Processing** - *[Lines 422-482](../chatbot_api/services/conversation.py#L422-L482)*
 
+The values stream is where the system processes **complete outputs from LangGraph nodes**. Each `if` condition handles a different type of node completion, creating a sophisticated routing and enhancement system.
+
+#### **🎯 Understanding Values Stream Architecture**
+
+**Key Insight**: The `if type == "values"` block is essentially a **node output dispatcher** that handles different types of completed work from the LangGraph workflow.
+
 ```python
-# conversation.py:422-482 - https://github.com/santander-group-ods/IA-mb-api-chatbot/blob/main/chatbot_api/services/conversation.py#L422-L482
 if type == "values":
-    # Contact Center Intent Check
+    # 1️⃣ CONTACT CENTER CLASSIFICATION → Human intervention decision
     if not cc_answer and "contact_center_answer" in value:
-        cc_answer = value["contact_center_answer"].answer
-        if cc_answer == "AGENT":
-            # Transfer to human agent
-            yield json.dumps(
-                SendMessageToAgentResponse.build_transfer_to_agent_response(
-                    session_context=session_context
-                ).model_dump(),
-                ensure_ascii=False,
-            )
-            return  # End stream immediately
+        # From: check_cc_redirect node
+        # Output: "AGENT" or "OTHER"
+        # Action: Transfer to human OR continue with AI
     
-    # Deep Links Processing
-    if not deep_links and "deep_links" in value and value["deep_links"]:
-        deep_links = value["deep_links"]
-        yield json.dumps(
-            SendMessageToAgentResponse.build_deep_links_response(
-                session_context=session_context,
-                deeplinks=deep_links,
-                state=state,
-            ).model_dump(),
-            ensure_ascii=False,
-        )
+    # 2️⃣ DEEP LINKS EXTRACTION → Resource discovery  
+    if not deep_links and "deep_links" in value:
+        # From: deep_link_invoke node
+        # Output: Array of helpful links
+        # Action: Send links to user interface
     
-    # Suggestions Processing
+    # 3️⃣ SUGGESTIONS GENERATION → Follow-up questions
     if not suggestions_answer and "suggestions" in value:
-        suggestions_answer = value["suggestions"]
-        yield json.dumps(
-            SendMessageToAgentResponse.build_suggestions_response(
-                session_context=session_context,
-                suggestions=suggestions_answer.followup_questions,
-                state=state,
-            ).model_dump(),
-            ensure_ascii=False,
-        )
+        # From: suggestions node
+        # Output: Array of suggested questions  
+        # Action: Display suggested questions in UI
+    
+    # 4️⃣ FINAL STATE CAPTURE → Complete workflow metadata
+    final_state = value
+    # From: Any node completion
+    # Contains: Documents, guardrail info, metadata
+    # Used for: Citations, database storage, error tracking
 ```
 
-**Purpose**: Process complete node outputs from LangGraph workflow
+#### **Why This Parallel Architecture Exists**
 
-#### **Contact Center Intent Classification Deep Dive**
+The system runs **multiple nodes simultaneously** to provide comprehensive assistance:
 
-The contact center logic represents one of the most critical decision points in the entire conversation flow. Understanding this mechanism is essential for grasping how the system intelligently routes conversations.
+```python
+# From agent.py - LangGraph workflow construction
+empty_initial 
+    ├── chatbot → tools → chatbot → empty_final    ← Main conversation
+    ├── check_cc_redirect → empty_final            ← ALWAYS RUNS (safety net)
+    ├── deep_link_invoke → empty_final             ← IF ENABLED (navigation help)  
+    └── suggestions → empty_final                  ← IF ENABLED (conversation guidance)
+```
+
+**This means every user message triggers:**
+- **Contact center analysis** (Is human help needed?)
+- **Main AI processing** (Generate the actual response)
+- **Optional enhancements** (Links, suggestions, etc.)
+
+**Result**: The system can make intelligent routing decisions while simultaneously preparing the AI response and helpful enhancements.
+
+> **📋 ARCHITECTURAL DECISION:** This parallel processing approach represents a conscious trade-off between speed and resource efficiency. For detailed analysis of the resource consumption implications, trade-offs, and alternative approaches considered, see **[ADR-001: Parallel Processing vs Sequential Processing](architecture-decisions.md#adr-001-parallel-processing-vs-sequential-processing-in-langgraph-workflow)** in the Architecture Decision Records.
+
+#### **Contact Center Classification: The Critical Decision Point**
+
+The contact center logic represents the most important routing mechanism in the entire system.
 
 **What is `cc_answer`?**
 
-`cc_answer` is **NOT** the contact center's response. It's the **AI's decision** about whether the user needs to be transferred to a human agent.
+`cc_answer` stores the AI's decision about whether the user needs human intervention. It's **NOT** the contact center's response—it's the **routing decision**.
 
-**Step-by-Step Flow Analysis:**
+**Step-by-Step Flow:**
 
 **1. Initial State** - *[Line 386](../chatbot_api/services/conversation.py#L386)*
 ```python
-cc_answer = None  # Initially empty - no decision made yet
+cc_answer = None  # No decision made yet
 ```
 
-**2. Values Stream Processing** - *[Line 423](../chatbot_api/services/conversation.py#L423)*
+**2. Classification Trigger** - *[Line 423](../chatbot_api/services/conversation.py#L423)*
 ```python
-if type == "values":  # ✅ YES - this IS a values stream
-    if not cc_answer and "contact_center_answer" in value:
-        cc_answer = value["contact_center_answer"].answer  # ← Critical decision point
+if not cc_answer and "contact_center_answer" in value:
+    cc_answer = value["contact_center_answer"].answer
 ```
-
-**What this means:**
-- **`type == "values"`** ✅ This is the values stream (complete node outputs)
-- **`not cc_answer`** ✅ We don't have a value yet because it hasn't been generated
-- **`"contact_center_answer" in value`** ✅ The LangGraph agent has completed its **intent classification** analysis
 
 **3. The Critical Decision** - *[Lines 424-434](../chatbot_api/services/conversation.py#L424-L434)*
 ```python
-cc_answer = value["contact_center_answer"].answer
 if cc_answer == "AGENT":
-    # Transfer to human agent
+    # User needs human help - end stream immediately
     yield json.dumps(
         SendMessageToAgentResponse.build_transfer_to_agent_response(
             session_context=session_context
         ).model_dump(),
         ensure_ascii=False,
     )
-    return  # ← ENDS THE STREAM HERE!
+    return  # ← TERMINATES ENTIRE STREAM
+else:
+    # AI can handle this - continue with conversation
+    logger.debug("User intent recognized as OTHER, continuing conversation")
+    # Send initial response to start AI conversation
+    if is_streaming:
+        yield json.dumps(
+            SendMessageToAgentResponse.build_send_conversation_response(
+                total_message, session_context, state
+            ).model_dump(),
+            ensure_ascii=False,
+        )
 ```
 
-**What Actually Happens:**
+**Understanding the `return` Statement:**
 
-1. **LLM Analysis**: The agent analyzes the user's message using an **intent classification model**
-2. **Decision Output**: The LLM decides:
-   - **`"AGENT"`** = "This user needs human help" 
-   - **`"OTHER"`** = "I can handle this conversation"
-3. **Stream Response**: Based on the decision:
-   - **If `"AGENT"`**: Send transfer response and **END STREAM immediately**
-   - **If `"OTHER"`**: Continue with AI conversation
+The `return` is crucial—it **immediately exits the entire `event_generator` function**, stopping all processing. This means:
 
-**Understanding `yield` and `return`:**
+- **If `"AGENT"`**: User gets transfer message, stream ends
+- **If `"OTHER"`**: Stream continues to AI response generation
+
+**Real-World Decision Examples:**
 
 ```python
-if cc_answer == "AGENT":
-    yield json.dumps(...)  # Send ONE final message: "Transferring to agent"
-    return                 # EXIT the entire event_generator function
+# Example 1: Needs Human
+# User: "I want to cancel my account and get a refund immediately!"
+# AI Analysis: "Complex account changes need human approval"
+# Result: cc_answer = "AGENT" → Transfer to human agent
+
+# Example 2: AI Can Handle  
+# User: "What's my current account balance?"
+# AI Analysis: "Simple query, I can handle with knowledge base"
+# Result: cc_answer = "OTHER" → Continue to AI response
 ```
 
-- **`yield`**: Sends the transfer response to the user
-- **`return`**: **Immediately terminates** the entire stream processing
-- **Result**: User sees "Transferring to human agent" and the conversation stops
+#### **Enhancement Processing (Deep Links & Suggestions)**
 
-**Real-World Examples:**
+After the critical routing decision, the system processes additional enhancements:
 
+**Deep Links Processing** - *[Lines 453-465](../chatbot_api/services/conversation.py#L453-L465)*
 ```python
-# Example 1: Transfer to Human
-# User: "I want to cancel my account immediately!"
-# AI Analysis: "This is complex, needs human help"
-# Result: cc_answer = "AGENT" → Stream ends with transfer message
-
-# Example 2: Continue with AI  
-# User: "What's my account balance?"
-# AI Analysis: "I can handle this with knowledge base"
-# Result: cc_answer = "OTHER" → Continue to AI response generation
+if not deep_links and "deep_links" in value and value["deep_links"]:
+    deep_links = value["deep_links"]
+    yield json.dumps(
+        SendMessageToAgentResponse.build_deep_links_response(
+            session_context=session_context,
+            deeplinks=deep_links,
+            state=state,
+        ).model_dump(),
+        ensure_ascii=False,
+    )
 ```
 
-**The Complete Decision Flow:**
-
-```mermaid
-graph TD
-    A[User Message] --> B[LangGraph Agent Analysis]
-    B --> C{Intent Classification}
-    C -->|"AGENT"| D[yield Transfer Response]
-    D --> E[return - END STREAM]
-    C -->|"OTHER"| F[Continue AI Conversation]
-    F --> G[Process deep_links, suggestions, etc.]
-    G --> H[Stream AI Response Chunks]
+**Suggestions Processing** - *[Lines 466-478](../chatbot_api/services/conversation.py#L466-L478)*
+```python
+if not suggestions_answer and "suggestions" in value:
+    suggestions_answer = value["suggestions"]
+    yield json.dumps(
+        SendMessageToAgentResponse.build_suggestions_response(
+            session_context=session_context,
+            suggestions=suggestions_answer.followup_questions,
+            state=state,
+        ).model_dump(),
+        ensure_ascii=False,
+    )
 ```
 
-**Key Insight:**
+**State Management During Processing:**
+```python
+state = DELTA_STATE
+if not initial_message_sent:
+    initial_message_sent = True
+    state = INITIAL_STATE
+```
 
-This is **early termination for intelligent routing**. The system can decide within milliseconds whether a conversation needs human intervention, preventing the AI from attempting to handle requests it shouldn't.
+This ensures proper UI state transitions for each type of response sent to the client.
 
-The `cc_answer` variable is essentially the **traffic controller** that determines the entire conversation flow. Without this logic, the AI might try to answer everything, leading to poor user experience for complex issues that truly need human help.
-
-**Why This Matters:**
-
-- **Intelligent Escalation**: Complex issues go directly to humans
-- **Resource Optimization**: AI handles what it can, humans handle what they should
-- **User Experience**: No frustrating loops of "AI trying to help but failing"
-- **Early Decision**: Decision made before wasting resources on AI generation
+**Purpose**: Process complete node outputs and make routing decisions
 
 ---
 

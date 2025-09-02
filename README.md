@@ -11,6 +11,7 @@
 ### Core Architecture 🏗️
 
 - **[Architecture Overview](architecture-overview.md)** - System design and component interaction
+- **[Architecture Decision Records](architecture-decisions.md)** - Key architectural decisions and trade-offs ⚠️
 - **[Database Architecture](database-architecture.md)** - Complete DynamoDB design and access patterns
 - **[Send Message Flow](send-message-flow.md)** - Complete conversation lifecycle and message processing analysis
 - **[_execute Method Flow](execute-method-flow.md)** - Detailed breakdown of core message processing logic
