@@ -344,7 +344,7 @@ empty_initial
 
 **Result**: The system can make intelligent routing decisions while simultaneously preparing the AI response and helpful enhancements.
 
-> **📋 ARCHITECTURAL DECISION:** This parallel processing approach represents a conscious trade-off between speed and resource efficiency. For detailed analysis of the resource consumption implications, trade-offs, and alternative approaches considered, see **[ADR-001: Parallel Processing vs Sequential Processing](architecture-decisions.md#adr-001-parallel-processing-vs-sequential-processing-in-langgraph-workflow)** in the Architecture Decision Records.
+> **📋 IMPLEMENTATION NOTE:** This parallel processing approach has significant resource implications. For detailed explanation of the resource consumption trade-offs and implementation rationale, see **[Pattern #1: Parallel Processing Architecture](architecture-decisions.md#pattern-1-parallel-processing-architecture-in-langgraph-workflow)** in the Architectural Implementation Patterns document.
 
 #### **Contact Center Classification: The Critical Decision Point**
 
