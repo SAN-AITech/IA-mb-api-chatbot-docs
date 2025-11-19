@@ -39,6 +39,36 @@ This document tracks the significant changes made to the IA MB API Chatbot codeb
 
 ## 🔄 Code Movement & Architecture Simplification
 
+### **Major Architecture Evolution: Memory System**
+
+#### **🧠 New: Dual-Memory Architecture Implementation**
+- **AgentCore Memory System**: New AWS Bedrock AgentCore integration for intelligent memory management
+- **Location**: `/src/ia_mb_api_chatbot/services/agent_execution/agent_memory.py`
+- **Classes**: 
+  - `AgentMemoryAgentCore`: Semantic search and user preference learning
+  - `AgentMemoryDynamoDB`: Traditional DynamoDB-based memory (maintained for compatibility)
+  - `SaveThreadMemory`: Threaded, dual-storage memory persistence
+
+#### **🏗️ Agent Execution Framework Modularization**
+- **New Module**: `/src/ia_mb_api_chatbot/services/agent_execution/`
+- **Components**:
+  - `AgentExecutor`: Main orchestration and initialization
+  - `MessageProcessor`: Streaming and message handling
+  - `AgentGuardrails`: Safety and compliance checking
+- **Benefits**: Clear separation of concerns, better testability, enhanced maintainability
+
+#### **⚙️ Configuration Management Evolution**
+- **AWS Parameter Store Primary**: Configuration now loads automatically from AWS Parameter Store using `ok-config`
+- **Optional .env Override**: `.env` file now only overrides specific parameters, all others load from Parameter Store
+- **No Manual Setup Required**: Database tables, models, guardrails automatically configured via Parameter Store
+- **Parameter Store Console**: Developers can explore parameters at [AWS Parameter Store Console](https://eu-west-1.console.aws.amazon.com/systems-manager/parameters/?region=eu-west-1&tab=Table)
+
+#### **🌐 Frontend Integration Changes**
+- **Integrated Frontend**: UI now available at `/gui` path (NiceGUI-based, not separate Angular server)
+- **Single Server**: No need for separate `ng serve` - frontend integrated into main FastAPI application
+- **API Documentation**: Available at `/docs` path (Swagger UI integrated)
+- **Static Assets**: Served at `/static/*` path
+
 ### Controller Layer (`chatbot_api/controllers/conversation.py`)
 - **`send_message_to_agent` endpoint**: Moved from **L98** → **L109** (+11 lines)
 - **⚠️ Important Discovery**: The controller is now **significantly simpler** than previously documented
@@ -65,17 +95,33 @@ async def send_message_to_agent(conversation_id: str, request: SendSaveMessageRe
 ## 📋 Impact Assessment
 
 ### ✅ **What Remains Unchanged**
+
 - **Core API functionality**: All endpoints work the same way
 - **Request/response models**: No changes to data structures
-- **Database schema**: Same DynamoDB table structure
+- **Database schema**: Same DynamoDB table structure (enhanced, not replaced)
 - **Business logic flow**: Conversation processing logic intact
-- **Configuration**: Environment variables and settings unchanged
+- **LangGraph Foundation**: Core orchestration framework maintained
 
 ### ⚠️ **What Changed**
-- **Documentation references**: Line numbers in docs needed updating
-- **Architecture clarity**: Controller layer is simpler than previously documented  
-- **Development tooling**: New helper scripts and proxy configurations added (**not part of main application**)
-- **Code organization**: Business logic more clearly separated between controller and service layers
+
+- **🆕 Configuration Source**: **Primary change** - AWS Parameter Store now primary configuration source, .env optional override only
+- **🆕 Frontend Integration**: **Major change** - UI integrated at `/gui` path, no separate Angular server needed
+- **🆕 API Documentation**: **Built-in** - Swagger UI available at `/docs` path
+- **🆕 Memory Architecture**: **Enhanced** - dual-tier memory system with AgentCore integration
+- **🆕 Agent Execution**: **Modularized** - agent execution framework for better maintainability
+- **🆕 Tool Integration**: **Enhanced** - support for MCP servers and dynamic tool registry
+
+### 🛠️ **Developer Impact**
+
+#### **Configuration Changes**
+- **No Manual Environment Setup**: Configuration loads automatically from Parameter Store
+- **Optional .env Override**: Only use .env for specific parameter overrides during development
+- **Parameter Exploration**: Use [AWS Parameter Store Console](https://eu-west-1.console.aws.amazon.com/systems-manager/parameters/?region=eu-west-1&tab=Table)
+
+#### **Development Workflow Changes**
+- **Single Server**: Start only one server with `uv run src/ia_mb_api_chatbot/run.py`
+- **Integrated Frontend**: Access UI at `http://localhost:8082/gui` (no separate Angular server)
+- **Built-in Documentation**: API docs at `http://localhost:8082/docs`
 
 ## 🛠️ Developer Actions Required
 
@@ -90,16 +136,22 @@ If you have saved line number bookmarks, update them:
 - **Connectivity Testing**: Use `python test_api.py` for basic API testing
 - **Local Proxy**: Update Angular development to use `proxy.conf.local.json`
 
-### 3. **Documentation Updates**
-- **Line References**: Main documentation (send-message-flow.md) has been updated
-- **Cross-references**: Check any custom documentation for outdated line numbers
+### 3. **New Memory System Configuration**
 
-## 🔗 Updated Documentation Links
+Add these to your environment/config for AgentCore memory:
 
-The following documentation has been updated to reflect current line numbers and improved organization:
-- **[Send Message Flow](send-message-flow.md)** - Complete flow with updated references and detailed request model usage
-- **[Request & Response Models](request-response-models.md)** - **New comprehensive models documentation**
-- **Cross-references**: All internal documentation links updated
+```yaml
+chat:
+  use_agentcore_memory: true        # Enable AgentCore memory (false = DynamoDB only)
+  agentcore_memory_id: "memory-123" # AgentCore memory identifier
+```
+
+### 4. **Updated Documentation References**
+
+Updated documentation reflecting current architecture:
+- **[Memory Management](memory-management.md)** - **🆕 Enhanced** with dual-memory system documentation
+- **[LangGraph Implementation](langgraph-implementation.md)** - **🆕 Updated** with modular execution framework
+- **Cross-references**: All internal documentation links updated for current line numbers
 
 ## 🎯 Migration Notes
 
@@ -115,6 +167,6 @@ The following documentation has been updated to reflect current line numbers and
 
 ---
 
-**Last Updated**: September 2025  
+**Last Updated**: November 2025  
 **Version**: Current main branch  
-**Status**: ✅ Documentation fully synchronized with codebase
+**Status**: ✅ Documentation fully synchronized with codebase including memory system evolution

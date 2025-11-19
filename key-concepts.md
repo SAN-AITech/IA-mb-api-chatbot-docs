@@ -175,8 +175,6 @@ class State(MessagesState):
 ### **Development Environment**
 - **UV Package Manager**: Fast Python package manager with enterprise JFrog repository integration
 - **Python 3.13**: Modern Python runtime with latest language features
-- **Node.js 22.14+**: JavaScript runtime for Angular frontend
-- **Angular CLI**: Development tools for frontend build and serve
 
 ### **Backend Technologies**
 - **FastAPI**: High-performance async web framework for REST APIs
@@ -184,10 +182,9 @@ class State(MessagesState):
 - **Pydantic**: Data validation and serialization with type safety
 
 ### **Frontend Technologies**
-- **Angular 17+**: Component-based web application framework
-- **TypeScript**: Type-safe JavaScript for better development experience
+- **NiceGUI**: Integrated web framework for Python-based user interfaces
 - **Server-Sent Events (SSE)**: Real-time communication for chat interface
-- **Responsive Design**: Mobile-friendly chat interface
+- **Integrated Interface**: Frontend available at `/gui` path within main application
 
 ### **AI & ML Technologies**
 - **AWS Bedrock**: Managed foundation model service (Claude, etc.)

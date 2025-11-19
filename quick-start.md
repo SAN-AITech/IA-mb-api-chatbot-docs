@@ -140,7 +140,7 @@ PUT /conversations/{conversation_id}/topic
 | **Development** | Bypassed | Hardcoded `'clientid'` | None |
 | **Production** | Full OIDC/JWT | JWT claim `username` | NGINX validation |
 
-**Important**: In development mode (`ng serve` + direct FastAPI), JWT authentication is completely bypassed for easier development and testing.
+**Important**: In development mode with integrated frontend, JWT authentication is completely bypassed for easier development and testing.
 
 ### **JWT Token Requirements (Production Only)**
 
@@ -190,89 +190,59 @@ sessionId="sess-456" → {browser: "Chrome", device: "Desktop", ...}
 
 ## Configuration
 
-### **Environment Variables**
+### **AWS Parameter Store (Primary Configuration)**
+
+The system automatically loads configuration from AWS Parameter Store using `ok-config`:
+
+- **Parameter Store Console**: [https://eu-west-1.console.aws.amazon.com/systems-manager/parameters/](https://eu-west-1.console.aws.amazon.com/systems-manager/parameters/?region=eu-west-1&tab=Table)
+- **Automatic Loading**: No manual setup required - parameters load on startup
+- **Parameter Format**: `commons.parameter-name` becomes `PARAMETER_NAME` environment variable
+- **All Configuration**: Database tables, AI models, guardrails, etc.
+
+### **Optional .env File Override**
+
+For development, create a `.env` file to override specific parameters:
 
 ```bash
-# AWS Configuration
-AWS_DEFAULT_REGION=eu-west-1
-INTERACTIONS_TABLE=chatbot-interactions-dev
-SESSIONS_TABLE=chatbot-sessions-dev
-
-# Agent Configuration  
-BEDROCK_MODEL_ID=anthropic.claude-3-sonnet-20240229-v1:0
-BEDROCK_REGION=eu-west-1
-
-# API Configuration
-API_PREFIX=/chatbot/api/v1
-CORS_ORIGINS=["https://mybank.com"]
+# .env file (optional) - only listed parameters override Parameter Store
+AWS_REGION=eu-west-1
+SERVER_PORT=8082
+SERVICE_NAME=mb-api-chatbot-mc
+# All other parameters still load from Parameter Store automatically
 ```
 
-### **Development vs Production**
-
-```yaml
-# config/dev.yaml
-database:
-  interactions_table: "chatbot-interactions-dev"
-  sessions_table: "chatbot-sessions-dev"
-agent:
-  model_id: "anthropic.claude-3-haiku-20240307-v1:0"  # Faster/cheaper
-
-# config/prod.yaml  
-database:
-  interactions_table: "chatbot-interactions-prod"
-  sessions_table: "chatbot-sessions-prod"
-agent:
-  model_id: "anthropic.claude-3-sonnet-20240229-v1:0"  # More capable
-```
+**Important**: Only parameters explicitly listed in `.env` will override Parameter Store values. All other configuration continues to load from Parameter Store.
 
 ## Running the System
 
 ### **Local Development**
 
-#### **Backend API (Python)**
-
 ```bash
-# Install dependencies with UV (enterprise JFrog repository)
+# Install dependencies from enterprise JFrog repository
+export UV_INDEX_PRIVATE_REGISTRY_USERNAME=x756900@opendigitalservices.com
+export UV_INDEX_PRIVATE_REGISTRY_PASSWORD=<your-jfrog-token>
 uv sync
 
-# Set environment variables
-export AWS_DEFAULT_REGION=eu-west-1
-export INTERACTIONS_TABLE=chatbot-interactions-dev
-
-# Start backend server
-uv run python chatbot_api/run.py
+# Start server - configuration automatically loads from AWS Parameter Store
+uv run src/ia_mb_api_chatbot/run.py
 ```
 
-#### **Frontend Web Interface (Angular)**
+### **Access the Application**
 
-```bash
-# Navigate to web directory
-cd web
+The application provides an integrated web interface:
 
-# Install Node.js dependencies
-npm install
+- **Main UI**: `http://localhost:8082/gui` (NiceGUI-based frontend)
+- **API Docs**: `http://localhost:8082/docs` (Interactive Swagger documentation)
+- **Health**: `http://localhost:8082/health`
 
-# Start development server
-ng serve --verbose
-```
+**Note**: No separate development server needed - the frontend is integrated at `/gui`.
 
-#### **Full Local Setup**
+### **Configuration Notes**
 
-```bash
-# Terminal 1: Start backend
-export AWS_REGION=eu-west-1
-export SERVICE_NAME=mb-api-chatbot-mc
-export AWS_PROFILE_NAME=default
-export SERVER_PORT=8083
-export SERVER_RELOAD=true
-uv run python chatbot_api/run.py
-
-# Terminal 2: Start frontend
-cd web
-ng serve --verbose
-```
-
-The backend will run on `http://localhost:8083` and the frontend on `http://localhost:4200`.
+- **Parameter Store**: Configuration loads automatically from AWS Parameter Store
+- **No Manual Setup**: Database tables, models, guardrails configured in Parameter Store
+- **JFrog Token**: Get `UV_INDEX_PRIVATE_REGISTRY_PASSWORD` from [JFrog Portal](https://gluoneurope.jfrog.io/ui/login)
+- **Token Expiration**: JFrog tokens expire every 3 months
 
 ### **Production Deployment**
 
@@ -306,9 +276,9 @@ GET /health/database
 
 ### **For Developers**
 
-1. **Setup**: Install UV and Node.js, configure AWS credentials
-2. **Backend**: `uv run python chatbot_api/run.py`
-3. **Frontend**: `cd web && ng serve --verbose`
+1. **Setup**: Install UV, configure AWS credentials
+2. **Backend**: `uv run src/ia_mb_api_chatbot/run.py`
+3. **Access**: Open `http://localhost:8082/gui` for the integrated frontend
 4. **Read**: [Architecture Overview](architecture-overview.md) - System design
 5. **Understand**: [Send Message Flow](send-message-flow.md) - Complete message processing and database guide
 6. **Explore**: [Database Architecture](database-architecture.md) - Data design
@@ -349,9 +319,6 @@ aws bedrock list-foundation-models --region eu-west-1
 # Verify UV installation and dependencies
 uv --version
 uv tree  # Show dependency tree
-
-# Check Angular CLI
-ng version
 ```
 
 This guide provides everything needed to understand and start using the IA MB API Chatbot system.

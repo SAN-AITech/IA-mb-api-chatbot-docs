@@ -10,9 +10,9 @@ The IA MB API Chatbot is an enterprise-grade conversational AI system that combi
 
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Angular Web   │    │   FastAPI       │    │   AWS Services  │
+│   Integrated    │    │   FastAPI       │    │   AWS Services  │
 │   Frontend      │◄──►│   Backend       │◄──►│   (AI/Storage)  │
-│                 │    │                 │    │                 │
+│   (NiceGUI)     │    │                 │    │                 │
 │ • Chat UI       │    │ • Conversation  │    │ • Bedrock LLMs  │
 │ • Real-time SSE │    │ • LangGraph     │    │ • Knowledge Base│
 │ • File Upload   │    │ • Session Mgmt  │    │ • DynamoDB      │
@@ -38,17 +38,17 @@ The IA MB API Chatbot is an enterprise-grade conversational AI system that combi
 
 ## System Components
 
-### **Frontend Layer (Angular)**
-- **Technology**: Angular 20.1.3 with TypeScript
+### **Frontend Layer (Integrated NiceGUI)**
+- **Technology**: NiceGUI framework integrated within FastAPI
 - **Responsibilities**:
   - Real-time chat interface with Server-Sent Events
   - Configuration management UI
   - File upload and attachment handling
   - Authentication and session management
 - **Key Features**:
-  - Responsive design for multiple devices
-  - Progressive Web App capabilities
-  - Internationalization support
+  - Integrated web interface at `/gui` path
+  - No separate server deployment required
+  - Real-time UI updates and responsiveness
 
 ### **Backend Layer (FastAPI)**
 - **Technology**: Python 3.13 with FastAPI framework
@@ -188,12 +188,12 @@ Request ──► Header Validation ──► Session Lookup ──► Client Au
 
 | Layer | Technology | Purpose |
 |-------|------------|---------|
-| Frontend | Angular 20.1.3, TypeScript | User interface and interaction |
+| Frontend | NiceGUI (integrated) | User interface and interaction |
 | Backend | Python 3.13, FastAPI | API services and business logic |
 | AI/ML | LangGraph, AWS Bedrock | Conversation orchestration and AI |
 | Storage | DynamoDB | Conversation and session persistence |
 | Infrastructure | AWS Services | Cloud platform and managed services |
-| Development | UV, Node.js, WSL2 | Development environment and tooling |
+| Development | UV, WSL2 | Development environment and tooling |
 
 ## Next Steps
 
@@ -228,7 +228,7 @@ This architecture provides a solid foundation for building scalable, secure, and
 
 ## Data Flow
 
-1. User sends message through Angular frontend
+1. User sends message through integrated frontend
 2. FastAPI receives request and validates headers
 3. Session context is created/retrieved
 4. LangGraph processes the conversation state

@@ -4,53 +4,12 @@
 
 ## Local Development Setup
 
-### Prerequisites
-
-#### **Required Software**
-
-- **Python 3.1#### **Terminal 1: Backend Server**
-
-```bash
-# Set environment variables
-export AWS_REGION=eu-west-1
-export SERVICE_NAME=mb-api-chatbot-mc
-export AWS_PROFILE_NAME=default
-export UV_INDEX_PRIVATE_REGISTRY_USERNAME=your-username@company.com
-export UV_INDEX_PRIVATE_REGISTRY_PASSWORD=your-enterprise-registry-token
-export SERVER_PORT=8083
-export SSL_CERT_FILE=/path/to/project/cacert.pem
-export SERVER_RELOAD=true
-
-# Start backend with UV
-uv run python chatbot_api/run.py
-```
-
-**Backend will be available at:** `http://localhost:8083`
-
-**API Documentation:** `http://localhost:8083/docs` (Swagger UI)
-
-#### **Terminal 2: Frontend Development Server**
-
-```bash
-# Navigate to web directory
-cd web
-
-# Start Angular development server
-ng serve --verbose
-```
-
-**Frontend will be available at:** `http://localhost:4200`
-
-**Proxy Configuration:** Automatically proxies `/chatbot/api/*` to backend
-
 ### **Prerequisites**
 
 #### **Required Software**
 
 - **Python 3.11+** - Backend runtime
 - **UV Package Manager** - Python dependency management (enterprise JFrog repository)
-- **Node.js 22.14+** - Frontend runtime
-- **Angular CLI** - Frontend development tools
 - **AWS CLI** - AWS service access
 - **Git** - Version control
 
@@ -60,32 +19,40 @@ ng serve --verbose
 # Install UV (if not already installed)
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Install Node.js (via nvm recommended)
-nvm install 22.14
-nvm use 22.14
-
-# Install Angular CLI
-npm install -g @angular/cli
-
 # Verify installations
 uv --version
-node --version
-ng version
 aws --version
 ```
 
-### **Project Setup**
+## Project Setup
 
-#### **1. Clone Repository**
+### **1. Clone Repository**
 
 ```bash
 git clone <repository-url>
 cd IA-mb-api-chatbot
 ```
 
-#### **2. Backend Setup (Python)**
+### **2. Obtain JFrog API Token**
+
+**Required for accessing enterprise Python packages:**
+
+1. **Navigate to JFrog Portal**: Go to [https://gluoneurope.jfrog.io/ui/login](https://gluoneurope.jfrog.io/ui/login)
+2. **Login**: Use SAML SSO with your corporate credentials
+3. **Generate Token**:
+   - Click your user icon (top right)
+   - Select "Edit Profile"
+   - Click "Generate an Identity Token"
+   - **Important**: Copy and save the token securely
+4. **Token Expiration**: Tokens expire every 3 months - set a calendar reminder
+
+### **3. Backend Setup (Python)**
 
 ```bash
+# Set JFrog credentials (required before uv sync)
+export UV_INDEX_PRIVATE_REGISTRY_USERNAME=x756900@opendigitalservices.com
+export UV_INDEX_PRIVATE_REGISTRY_PASSWORD=<your-jfrog-token>
+
 # Install Python dependencies from enterprise JFrog repository
 uv sync
 
@@ -93,57 +60,39 @@ uv sync
 uv tree
 ```
 
-#### **3. Frontend Setup (Angular)**
+## Environment Configuration
+
+### **AWS Parameter Store (Primary)**
+
+Configuration automatically loads from AWS Parameter Store using `ok-config`:
 
 ```bash
-# Navigate to web directory
-cd web
-
-# Install Node.js dependencies
-npm install
-
-# Verify Angular setup
-ng version
-
-# Return to project root
-cd ..
+# No manual configuration needed - parameters load automatically on startup
+# Explore your parameters at:
+# https://eu-west-1.console.aws.amazon.com/systems-manager/parameters/?region=eu-west-1&tab=Table
 ```
 
-### **Environment Configuration**
+**Parameter Store Benefits:**
 
-#### **AWS Credentials**
+- **Centralized Configuration**: All environments managed in one place
+- **Secure Storage**: Sensitive values encrypted at rest
+- **Automatic Loading**: No manual environment setup required
+- **Service Integration**: Integrates with SERVICE_NAME environment variable
+
+### **Optional .env Override (Development Only)**
+
+Create a `.env` file to override specific Parameter Store values during development:
 
 ```bash
-# Configure AWS CLI (required for DynamoDB and Bedrock access)
-aws configure
+# .env file (optional) - only overrides specific parameters
+AWS_REGION=eu-west-1
+SERVER_PORT=8082
+SERVICE_NAME=mb-api-chatbot-mc
 
-# Or use environment variables
-export AWS_ACCESS_KEY_ID=your-access-key
-export AWS_SECRET_ACCESS_KEY=your-secret-key
-export AWS_DEFAULT_REGION=eu-west-1
+# All other parameters (database tables, models, etc.) still load from Parameter Store
 ```
 
-#### **Application Environment Variables**
-
-```bash
-# Backend configuration
-export AWS_DEFAULT_REGION=eu-west-1
-export INTERACTIONS_TABLE=chatbot-interactions-dev
-export SESSIONS_TABLE=chatbot-sessions-dev
-export BEDROCK_MODEL_ID=anthropic.claude-3-sonnet-20240229-v1:0
-export BEDROCK_REGION=eu-west-1
-
-# Optional: Debug logging
-export LOG_LEVEL=DEBUG
-```
-
-#### **Configuration Files**
-
-```bash
-# Development configuration
-config/dev.yaml       # Backend settings for development
-web/proxy.conf.json   # Frontend proxy configuration for local development
-```
+**Important**: Only parameters listed in `.env` override Parameter Store. All unlisted parameters continue loading from Parameter Store automatically.
 
 ## Running the Application
 
@@ -151,8 +100,8 @@ web/proxy.conf.json   # Frontend proxy configuration for local development
 
 **In development mode, JWT authentication is completely bypassed:**
 
-- **No NGINX OIDC**: Direct Angular → FastAPI communication
-- **Hardcoded Client ID**: Uses `'clientid'` from Angular interceptor
+- **No NGINX OIDC**: Direct frontend → FastAPI communication
+- **Hardcoded Client ID**: Uses `'clientid'` from frontend interceptor
 - **No Token Validation**: FastAPI accepts any client ID header
 - **Simplified Flow**: Perfect for development and testing
 
@@ -160,21 +109,32 @@ This means you can develop and test without dealing with OAuth/JWT complexity.
 
 ### **Development Mode (Recommended)**
 
-#### **Terminal 1: Backend Server**
+### **Complete Environment Setup**
 
 ```bash
-# Set environment variables
-export AWS_DEFAULT_REGION=eu-west-1
-export INTERACTIONS_TABLE=chatbot-interactions-dev
-export SESSIONS_TABLE=chatbot-sessions-dev
+# Required: JFrog repository access
+export UV_INDEX_PRIVATE_REGISTRY_USERNAME=x756900@opendigitalservices.com
+export UV_INDEX_PRIVATE_REGISTRY_PASSWORD=<your-jfrog-token>
 
-# Start backend with UV
-uv run python chatbot_api/run.py
+# Install dependencies
+uv sync
+
+# Start server (configuration loads automatically from AWS Parameter Store)
+uv run src/ia_mb_api_chatbot/run.py
 ```
 
-**Backend will be available at:** `http://localhost:8083`
+**Access Points:**
 
-**API Documentation:** `http://localhost:8083/docs` (Swagger UI)
+- **Frontend UI**: `http://localhost:8082/gui` (integrated NiceGUI interface)
+- **API Documentation**: `http://localhost:8082/docs` (Swagger UI)
+- **API Testing**: `http://localhost:8082/redoc` (ReDoc format)
+- **Health Check**: `http://localhost:8082/health`
+
+**Configuration Notes:**
+
+- **Parameter Store**: Configuration loads automatically - no manual setup required
+- **JFrog Token**: Obtain from [JFrog Portal](https://gluoneurope.jfrog.io/ui/login) - expires every 3 months
+- **AWS Credentials**: Required for Parameter Store and service access
 
 ### **Production Mode**
 
@@ -195,7 +155,7 @@ This script includes:
 
 ```text
 IA-mb-api-chatbot/
-├── chatbot_api/           # Python FastAPI backend
+├── src/ia_mb_api_chatbot/ # Python FastAPI backend
 │   ├── controllers/       # API endpoint handlers
 │   │   ├── conversation.py    # Conversation management
 │   │   ├── sessions.py        # Session handling
@@ -207,68 +167,41 @@ IA-mb-api-chatbot/
 │   ├── domain/            # Data models and DTOs
 │   │   ├── requests/          # Request models
 │   │   └── responses/         # Response models
-│   ├── main.py           # FastAPI application setup
-│   └── run.py            # Application entry point
-├── web/                  # Angular frontend
-│   ├── src/app/         # Angular application
-│   │   ├── services/        # API communication
-│   │   ├── components/      # UI components
-│   │   └── models/          # TypeScript interfaces
-│   ├── proxy.conf.json  # Development proxy setup
-│   └── package.json     # Node.js dependencies
-├── config/              # Environment configurations
-│   ├── dev.yaml         # Development settings
-│   └── qa.yaml          # QA environment settings
-├── test/                # Unit and integration tests
-└── docs/                # Technical documentation
+│   ├── frontend/          # Integrated NiceGUI frontend
+│   ├── main.py            # FastAPI application setup
+│   └── run.py             # Application entry point
+├── config/                # Environment configurations
+│   ├── dev.yaml           # Development settings
+│   └── qa.yaml            # QA environment settings
+├── tests/                 # Unit and integration tests
+└── docs/                  # Technical documentation
 ```
 
 ### **Development Commands**
 
-#### **Backend Development**
+### **Backend Development**
 
 ```bash
-# Run backend server
-uv run python chatbot_api/run.py
+# Run backend server (correct path)
+uv run src/ia_mb_api_chatbot/run.py
 
-# Run specific module
-uv run python -m chatbot_api.main
+# Alternative: Run specific module
+uv run python -m src.ia_mb_api_chatbot.run
 
 # Run tests
-uv run pytest test/
+uv run pytest tests/
 
 # Check code formatting
-uv run black chatbot_api/
-uv run flake8 chatbot_api/
+uv run black src/
+uv run flake8 src/
 
 # Type checking
-uv run mypy chatbot_api/
-```
-
-#### **Frontend Development**
-
-```bash
-cd web
-
-# Development server
-ng serve --verbose
-
-# Build for production
-ng build --prod
-
-# Run tests
-ng test
-
-# Run linting
-ng lint
-
-# Check for updates
-ng update
+uv run mypy src/
 ```
 
 ### **Dependency Management**
 
-#### **Python Dependencies (UV)**
+### **Python Dependencies (UV)**
 
 ```bash
 # Add new dependency
@@ -287,55 +220,22 @@ uv tree
 uv export --format requirements-txt > requirements.txt
 ```
 
-#### **Node.js Dependencies**
-
-```bash
-cd web
-
-# Add new dependency
-npm install package-name
-
-# Add development dependency
-npm install --save-dev package-name
-
-# Update dependencies
-npm update
-
-# Audit for vulnerabilities
-npm audit
-```
-
 ## Testing
 
 ### **Backend Testing**
 
 ```bash
 # Run all tests
-uv run pytest test/
+uv run pytest tests/
 
 # Run specific test file
-uv run pytest test/services/test_conversation.py
+uv run pytest tests/services/test_conversation.py
 
 # Run with coverage
-uv run pytest test/ --cov=chatbot_api
+uv run pytest tests/ --cov=src
 
 # Run integration tests
-uv run pytest test/ -m integration
-```
-
-### **Frontend Testing**
-
-```bash
-cd web
-
-# Run unit tests
-ng test
-
-# Run e2e tests
-ng e2e
-
-# Generate test coverage
-ng test --code-coverage
+uv run pytest tests/ -m integration
 ```
 
 ## Debugging
@@ -347,29 +247,16 @@ ng test --code-coverage
 export LOG_LEVEL=DEBUG
 
 # Run with Python debugger
-uv run python -m pdb chatbot_api/run.py
+uv run python -m pdb src/ia_mb_api_chatbot/run.py
 
 # Check AWS connectivity
 aws dynamodb describe-table --table-name chatbot-interactions-dev
 aws bedrock list-foundation-models --region eu-west-1
 ```
 
-### **Frontend Debugging**
-
-```bash
-# Angular CLI debug information
-ng version
-
-# Verbose output
-ng serve --verbose
-
-# Check proxy configuration
-cat web/proxy.conf.json
-```
-
 ### **Common Issues**
 
-#### **AWS Connection Issues**
+### **AWS Connection Issues**
 
 ```bash
 # Verify AWS credentials
@@ -382,7 +269,7 @@ aws iam get-user
 aws dynamodb list-tables
 ```
 
-#### **UV Package Issues**
+### **UV Package Issues**
 
 ```bash
 # Clear UV cache
@@ -395,35 +282,27 @@ uv sync --force
 uv tree --show-conflicts
 ```
 
-#### **CORS Issues**
-
-```bash
-# Check frontend proxy configuration
-cat web/proxy.conf.json
-
-# Verify backend CORS settings in config/dev.yaml
-```
-
 ## Advanced Development
 
 ### **Hot Reloading**
 
-Both backend and frontend support hot reloading during development:
+The backend supports hot reloading during development:
 
 - **Backend**: FastAPI automatically reloads on code changes
-- **Frontend**: Angular CLI watches for changes and rebuilds
+- **Frontend**: Integrated NiceGUI interface updates automatically
 
 ### **API Development**
 
 ```bash
-# Interactive API documentation
-http://localhost:8083/docs          # Swagger UI
-http://localhost:8083/redoc         # ReDoc
+# Interactive API documentation  
+http://localhost:8082/docs          # Swagger UI
+http://localhost:8082/redoc         # ReDoc
 
 # Test API endpoints
-curl -X POST http://localhost:8083/chatbot/api/v1/sessions \
+curl -X POST http://localhost:8082/sessions \
   -H "Content-Type: application/json" \
-  -d '{"clientId": "test-client"}'
+  -H "x-santander-client-id: test-client" \
+  -d '{"analytics": {"browser": "Chrome", "device": "Desktop", "pageUrl": "http://localhost:8082/gui/", "channel": "web"}}'
 ```
 
 ### **Database Development**
@@ -444,12 +323,6 @@ aws dynamodb scan --table-name chatbot-interactions-dev --max-items 10
 - **Logs**: Structured JSON logging to stdout
 - **Tracing**: OpenTelemetry integration for distributed tracing
 
-### **Frontend Monitoring**
-
-- **Build Analysis**: `ng build --stats-json` followed by webpack-bundle-analyzer
-- **Performance**: Chrome DevTools Lighthouse audits
-- **Network**: Monitor API calls in browser DevTools
-
 ## Troubleshooting
 
 ### **Common Problems**
@@ -457,11 +330,8 @@ aws dynamodb scan --table-name chatbot-interactions-dev --max-items 10
 1. **Port Already in Use**
 
    ```bash
-   # Backend (port 8083)
-   lsof -ti:8083 | xargs kill
-   
-   # Frontend (port 4200)
-   lsof -ti:4200 | xargs kill
+   # Backend (port 8082)
+   lsof -ti:8082 | xargs kill
    ```
 
 2. **AWS Permission Denied**
@@ -479,15 +349,4 @@ aws dynamodb scan --table-name chatbot-interactions-dev --max-items 10
    source ~/.bashrc
    ```
 
-4. **Angular CLI Issues**
-
-   ```bash
-   # Clear npm cache
-   npm cache clean --force
-   
-   # Reinstall Angular CLI
-   npm uninstall -g @angular/cli
-   npm install -g @angular/cli@latest
-   ```
-
-This development guide provides everything needed to set up and work with the IA MB API Chatbot locally using the actual tooling (UV, Angular CLI) and deployment methods.
+This development guide provides everything needed to set up and work with the IA MB API Chatbot locally using UV package management and the integrated frontend interface.
