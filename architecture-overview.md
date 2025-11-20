@@ -9,31 +9,34 @@ The IA MB API Chatbot is an enterprise-grade conversational AI system that combi
 ## High-Level Architecture
 
 ```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Integrated    │    │   FastAPI       │    │   AWS Services  │
-│   Frontend      │◄──►│   Backend       │◄──►│   (AI/Storage)  │
-│   (NiceGUI)     │    │                 │    │                 │
-│ • Chat UI       │    │ • Conversation  │    │ • Bedrock LLMs  │
-│ • Real-time SSE │    │ • LangGraph     │    │ • Knowledge Base│
-│ • File Upload   │    │ • Session Mgmt  │    │ • DynamoDB      │
-│ • Configuration │    │ • Authentication│    │ • Guardrails    │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-         │                        │                        │
-         └────────────────────────┼────────────────────────┘
-                                  │
-                    ┌─────────────────┐
-                    │   Data Flow     │
-                    │                 │
-                    │ User Question   │
-                    │      ↓          │
-                    │ RAG Retrieval   │
-                    │      ↓          │
-                    │ LLM Processing  │
-                    │      ↓          │
-                    │ Response Stream │
-                    │      ↓          │
-                    │ Database Store  │
-                    └─────────────────┘
+┌─────────────────┐    ┌─────────────────────────────────────┐    ┌─────────────────┐
+│   Integrated    │    │         FastAPI Backend             │    │   AWS Services  │
+│   Frontend      │◄──►│                                     │◄──►│   (AI/Storage)  │
+│   (NiceGUI)     │    │  ┌─────────────────────────────┐    │    │                 │
+│ • Chat UI       │    │  │    Agent Execution Layer    │    │    │ • Bedrock LLMs  │
+│ • Real-time SSE │    │  │                             │    │    │ • AgentCore     │
+│ • File Upload   │    │  │ • AgentExecutor             │    │    │ • Knowledge Base│
+│ • Configuration │    │  │ • MessageProcessor          │    │    │ • DynamoDB      │
+│                 │    │  │ • AgentMemory (dual)        │    │    │ • Guardrails    │
+│                 │    │  │ • AgentGuardrails           │    │    │ • MCP Servers   │
+│                 │    │  └─────────────────────────────┘    │    │                 │
+└─────────────────┘    └─────────────────────────────────────┘    └─────────────────┘
+         │                              │                                  │
+         └──────────────────────────────┼──────────────────────────────────┘
+                                        │
+                          ┌─────────────────────────────┐
+                          │        Data Flow            │
+                          │                             │
+                          │ User Question               │
+                          │      ↓                      │
+                          │ AgentExecutor.init_agent()  │
+                          │      ↓                      │
+                          │ RAG Retrieval + Tools       │
+                          │      ↓                      │
+                          │ MessageProcessor streams    │
+                          │      ↓                      │
+                          │ Memory persistence          │
+                          └─────────────────────────────┘
 ```
 
 ## System Components
@@ -51,66 +54,86 @@ The IA MB API Chatbot is an enterprise-grade conversational AI system that combi
   - Real-time UI updates and responsiveness
 
 ### **Backend Layer (FastAPI)**
+
 - **Technology**: Python 3.13 with FastAPI framework
-- **Architecture Pattern**: Clean Architecture with layered separation
+- **Architecture Pattern**: Modular Agent Execution with clean separation
 - **Responsibilities**:
   - RESTful API endpoints for chat operations
   - Real-time streaming with Server-Sent Events
   - Session and conversation management
-  - Integration orchestration with AWS services
+  - Agent execution orchestration
 
-#### **Backend Layer Structure**
-```
-Controllers Layer    ──► API endpoints and request handling
+#### **Modular Agent Execution Architecture**
+
+```text
+Agent Service Layer         ──► LangGraph orchestration and tool integration
      │
-Services Layer      ──► Business logic and orchestration
+Agent Execution Framework   ──► Specialized execution components
+     ├── AgentExecutor       ──► Core orchestration and initialization
+     ├── MessageProcessor    ──► Dual stream handling and response processing
+     ├── AgentMemory        ──► Memory system abstraction (AgentCore/DynamoDB)
+     └── AgentGuardrails    ──► Safety and content filtering
      │
-Domain Layer        ──► Data models and business entities
+Controllers Layer          ──► API endpoints and request handling
      │
-Infrastructure      ──► AWS integrations and external services
+Domain Layer              ──► Data models and business entities
+     │
+Infrastructure            ──► AWS integrations and external services
 ```
 
-### **AI/ML Layer (AWS Bedrock + LangGraph)**
-- **LangGraph**: Conversation workflow orchestration
+### **AI/ML Layer (AWS Bedrock + LangGraph + MCP)**
+
+- **LangGraph**: StateGraph-based conversation orchestration
 - **AWS Bedrock**: Foundation models for text generation
+- **AgentCore Memory**: Advanced semantic memory with user preference learning
 - **Knowledge Base**: RAG (Retrieval-Augmented Generation) for contextual responses
 - **Guardrails**: Content safety and compliance filtering
+- **MCP Servers**: Model Context Protocol for external tool integration
 
-### **Storage Layer (DynamoDB)**
-- **INTERACTIONS_TABLE**: All conversation messages and responses
-- **SESSIONS_TABLE**: User session metadata and analytics
-- **Design Pattern**: Single-table design with composite keys
+### **Memory Layer (Dual System)**
+
+- **AgentCore (Primary)**: AWS Bedrock's advanced memory system
+  - Semantic search capabilities
+  - User preference learning
+  - Context-aware memory retrieval
+- **DynamoDB (Fallback)**: Traditional persistence layer
+  - INTERACTIONS_TABLE: All conversation messages and responses
+  - SESSIONS_TABLE: User session metadata and analytics
+- **Runtime Switching**: Configurable memory system selection
 
 ## Data Flow Architecture
 
 ### **Conversation Processing Pipeline**
 
-```
+```text
 1. User Input Validation
    ├── Session validation (headers)
    ├── Request structure validation
-   └── Content safety check
+   └── Content safety check (AgentGuardrails)
 
-2. Conversation Context Assembly  
-   ├── Retrieve conversation history
-   ├── Build SessionContext
-   └── Security validation (ownership)
+2. Agent Initialization (AgentExecutor)
+   ├── Memory system selection (AgentCore/DynamoDB)
+   ├── Tool registry setup (MCP servers, Knowledge Base)
+   ├── LangGraph state initialization
+   └── Context assembly from conversation history
 
-3. AI Processing (LangGraph)
+3. Agent Execution Framework
+   ├── StateGraph orchestration with tool calling
    ├── Knowledge Base retrieval (RAG)
-   ├── Agent classification (human vs AI)
-   ├── Foundation model processing
-   └── Response generation
+   ├── Foundation model processing (Bedrock)
+   ├── Memory persistence (dual system)
+   └── Response generation with citations
 
-4. Real-time Streaming
-   ├── Server-Sent Events to frontend
+4. Stream Processing (MessageProcessor)
+   ├── Dual stream handling (messages + values)
+   ├── Real-time delivery via Server-Sent Events
    ├── Progressive response building
    └── State management (init/delta/end)
 
-5. Persistence
-   ├── Store user message
-   ├── Store retrieved documents
-   └── Store AI response
+5. Post-processing
+   ├── Memory storage (conversation context)
+   ├── Analytics and session tracking
+   └── Cleanup and resource management
 ```
 
 ### **Security and Access Control**
@@ -149,9 +172,11 @@ Request ──► Header Validation ──► Session Lookup ──► Client Au
 - **Analytics**: Session tracking and conversation metrics
 
 ### **Configuration Management**
-- **Environment-based**: Separate configs for dev/qa/prod
-- **YAML Configuration**: Agent settings and prompts
-- **Feature Flags**: Dynamic system behavior control
+
+- **AWS Parameter Store (Primary)**: `ok-config` system for automatic configuration loading
+- **Environment Variables (.env)**: Optional local overrides for development
+- **YAML Configuration**: Agent settings, prompts, and behavior templates
+- **Feature Flags**: Dynamic system behavior control via configuration switches
 
 ## Security Architecture
 
@@ -188,12 +213,14 @@ Request ──► Header Validation ──► Session Lookup ──► Client Au
 
 | Layer | Technology | Purpose |
 |-------|------------|---------|
-| Frontend | NiceGUI (integrated) | User interface and interaction |
-| Backend | Python 3.13, FastAPI | API services and business logic |
-| AI/ML | LangGraph, AWS Bedrock | Conversation orchestration and AI |
+| Frontend | NiceGUI (integrated) | User interface and real-time interaction |
+| Backend | Python 3.13, FastAPI, AgentExecutor | API services and modular execution |
+| AI/ML | LangGraph, AWS Bedrock, MCP Servers | Agent orchestration and AI processing |
+| Memory | AWS AgentCore, DynamoDB (dual) | Advanced semantic and traditional memory |
+| Configuration | AWS Parameter Store, .env | Dynamic configuration management |
 | Storage | DynamoDB | Conversation and session persistence |
 | Infrastructure | AWS Services | Cloud platform and managed services |
-| Development | UV, WSL2 | Development environment and tooling |
+| Development | UV, WSL2 | Package management and development environment |
 
 ## Next Steps
 
@@ -204,35 +231,6 @@ To dive deeper into specific aspects of the system:
 3. **Explore Database**: Review [Database Design](./database-design.md) for storage patterns
 4. **API Reference**: Check [API Endpoints](./api-endpoints.md) for integration details
 5. **AI Implementation**: Examine [LangGraph Implementation](./langgraph-implementation.md) for AI workflow
+6. **Memory Management**: Read [Memory Management](./memory-management.md) for dual memory system details
 
-This architecture provides a solid foundation for building scalable, secure, and maintainable conversational AI applications.
-- `agent.py` - LLM agent implementation
-- `aws.py` - AWS DynamoDB and Bedrock integration
-- `session.py` - Session lifecycle management
-- `prompts.py` - Prompt templates management
-
-### 4. **Domain Layer**
-- Request/Response models
-- Session context management
-- Agent configuration
-
-## Key Technologies
-
-- **FastAPI**: REST API framework
-- **LangGraph**: Conversation state management
-- **LangChain**: LLM integration
-- **AWS Bedrock**: Foundation models
-- **AWS DynamoDB**: Persistent storage
-- **AWS Knowledge Base**: RAG (Retrieval Augmented Generation)
-- **Server-Sent Events (SSE)**: Real-time streaming responses
-
-## Data Flow
-
-1. User sends message through integrated frontend
-2. FastAPI receives request and validates headers
-3. Session context is created/retrieved
-4. LangGraph processes the conversation state
-5. Agent queries Knowledge Base for relevant documents
-6. LLM generates response using context + retrieved docs
-7. Response is streamed back via SSE
-8. Conversation state is persisted to DynamoDB
+This modular architecture provides a solid foundation for building scalable, secure, and maintainable conversational AI applications with advanced memory capabilities and flexible tool integration.

@@ -1,53 +1,56 @@
-[← Back to Documentation Home](README.md)
-
 # Send Message to Agent - Complete Flow & Database Guide
+
+[← Back to Documentation Home](README.md)
 
 ## Overview
 
-The `send_message_to_agent` endpoint is the core functionality of the chatbot API. It processes user messages through a sophisticated AI pipeline using LangGraph, AWS Bedrock, and real-time streaming responses. This comprehensive guide covers the complete flow from API request to database storage, including conversation iteration concepts and database architecture.
+The `send_message_to_agent` endpoint is the core functionality of the chatbot API. It processes user messages through a sophisticated AI pipeline using the modular AgentExecutor framework, AWS Bedrock, and real-time streaming responses. This comprehensive guide covers the complete flow from API request to database storage, including conversation iteration concepts and database architecture.
 
-**High-Level Flow**: The endpoint receives user input, identifiers, and request parameters. It validates security by looking up the last interaction, builds a comprehensive SessionContext, and then passes both the SendSaveMessageRequest and SessionContext to the core `_execute` method that orchestrates the entire AI conversation workflow.
+**High-Level Flow**: The endpoint receives user input, identifiers, and request parameters. It validates security by looking up the last interaction, builds a comprehensive SessionContext, and then passes both the SendSaveMessageRequest and SessionContext to the AgentExecutor framework that orchestrates the entire AI conversation workflow through specialized components.
 
 ## Quick Architecture Overview
 
 ```text
-User Message → Security Validation → Session Context → Agent Processing → Database Storage → Response
-     ↓              ↓                    ↓                ↓                 ↓              ↓
- HTTP Request   Client Ownership    Context Building   LangGraph      Message Storage   JSON Response
+User Message → Security Validation → Session Context → AgentExecutor Processing → Database Storage → Response
+     ↓              ↓                    ↓                    ↓                     ↓              ↓
+ HTTP Request   Client Ownership    Context Building   Agent Framework      Message Storage   JSON Response
 ```
 
-**Flow Summary**: 
+**Flow Summary**:
+
 1. **HTTP Request** arrives with user message and metadata
 2. **Client Ownership** verified through database lookup  
 3. **Context Building** creates comprehensive SessionContext
-4. **LangGraph** processes message through AI pipeline
-5. **Message Storage** persists conversation to DynamoDB
+4. **Agent Framework** processes message through modular AgentExecutor system
+5. **Message Storage** persists conversation to dual memory system
 6. **JSON Response** streams back to user in real-time
 
 ## Endpoint Details
 
 **Route**: `POST /conversations/{conversation_id}/messages`  
-**Controller**: [conversation.py#L109](../chatbot_api/controllers/conversation.py#L109)  
-**Service Method**: [conversation.py#L259](../chatbot_api/services/conversation.py#L259)  
-**Core Engine**: [conversation.py#L346 (_execute)](../chatbot_api/services/conversation.py#L346)
+**Controller**: [conversation.py](../src/ia_mb_api_chatbot/controllers/conversation.py)  
+**Service Method**: [agent.py (build)](../src/ia_mb_api_chatbot/services/agent.py)  
+**Execution Framework**: [agent_execution/ module](../src/ia_mb_api_chatbot/services/agent_execution/)
 
 ## 📢 **Recent Changes Notice**
 
-> **⚠️ Important**: This documentation reflects the current codebase version with updated line numbers. Key method locations have changed:
-> - **Controller endpoint**: `send_message_to_agent` now at **L109** (previously L98)
-> - **Service method**: `process_user_input` now at **L259** (previously L251)  
-> - **Core engine**: `_execute` method now at **L346** (previously L322)
-> 
-> All line references in this document have been updated to match the current implementation.
+> **⚠️ Important**: This documentation reflects the current modular architecture with AgentExecutor framework:
+>
+> - **Agent Architecture**: Now uses **AgentExecutor** framework with specialized components
+> - **Message Processing**: **MessageProcessor** handles dual stream processing
+> - **Memory System**: **Dual memory** system (AgentCore + DynamoDB) with runtime switching
+> - **Execution Flow**: **Modular components** replace monolithic `_execute` method
+>
+> All references in this document reflect the current modular implementation.
 
 ## Request Flow Architecture
 
-```
-User Input → Validation → Security Check → Context Building → Core Execution Engine → Real-time Streaming → Database Storage
-     ↓              ↓            ↓              ↓                    ↓                     ↓                ↓
-  JSON Request → Headers → Last Interaction → SessionContext → _execute() Method → Server-Sent Events → DynamoDB
+```text
+User Input → Validation → Security Check → Context Building → AgentExecutor Framework → Real-time Streaming → Dual Memory Storage
+     ↓              ↓            ↓              ↓                       ↓                        ↓                    ↓
+  JSON Request → Headers → Last Interaction → SessionContext → AgentExecutor.init_agent() → MessageProcessor → AgentCore/DynamoDB
                                                      ↓
-                                        LangGraph Agent + AWS Bedrock + Knowledge Base
+                                    LangGraph StateGraph + AWS Bedrock + Knowledge Base + MCP Servers
 ```
 
 > **📋 Data Models Reference**: For detailed API request/response models and data structures, see [Request & Response Models Documentation](request-response-models.md)
@@ -55,6 +58,7 @@ User Input → Validation → Security Check → Context Building → Core Execu
 ## What is a Conversation Iteration?
 
 ### **Definition**
+
 A **conversation iteration** is one complete turn in a chat conversation, consisting of:
 
 1. **User Input** → Stored as `author="human"`
@@ -64,7 +68,7 @@ A **conversation iteration** is one complete turn in a chat conversation, consis
 
 ### **Iteration Lifecycle Visualization**
 
-```
+```bach
 ┌─────────────────┐     ┌─────────────────┐    ┌─────────────────┐
 │   User Message  │───▶│  AI Processing  │───▶│   AI Response   │
 │   messageId: 1  │     │   (LangGraph)   │    │   messageId: 3  │
@@ -91,9 +95,9 @@ A **conversation iteration** is one complete turn in a chat conversation, consis
 
 ## Complete Processing Flow
 
-### **Phase 1: Request Validation & Setup** - *[conversation.py#L109-L128](../chatbot_api/controllers/conversation.py#L109-L128)*
+### **Phase 1: Request Validation & Setup**
 
-The controller layer is intentionally simple, following clean architecture principles by acting as a pure routing layer.
+The controller layer is intentionally simple, following clean architecture principles by acting as a pure routing layer through the conversation controller.
 
 #### **FastAPI Automatic Validation & SendSaveMessageRequest Structure**
 
@@ -121,6 +125,7 @@ class Context(BaseModel):
 ```
 
 **Key Validation Points**:
+
 - **`input.text`**: Only required field - the actual user message
 - **`input.options.stream`**: Controls response delivery method (SSE vs HTTP)
 - **`input.options.suggestions`**: Whether to generate follow-up questions
@@ -145,34 +150,37 @@ return await conversation_service.process_user_input(
 
 **Key Design Decision**: All validation, security checks, and business logic are handled in the service layer, keeping the controller focused solely on HTTP routing.
 
-### **Phase 2: Database Status Validation** - *[conversation.py#L280-L289](../chatbot_api/services/conversation.py#L280-L289)*
+### **Phase 2: Security Validation & Context Building**
 
-This critical security check ensures conversation ownership and prevents unauthorized access.
+This critical security phase ensures conversation ownership and prevents unauthorized access before building the execution context.
 
-1. **Retrieve Last Interaction** - *[conversation.py#L280](../chatbot_api/services/conversation.py#L280)*:
+1. **Retrieve Last Interaction**:
+
    ```python
    last_interaction = service_aws.get_conversation_last_interaction(conversation_id)
    ```
 
-2. **Database Query Implementation** - *[aws.py#L114-L125](../chatbot_api/services/aws.py#L114-L125)*:
+2. **Database Query Implementation**:
+
    ```python
    def get_conversation_last_interaction(self, conversation_id: str):
        """Retrieve the last interaction of a conversation."""
        response = self.dynamodb.query(
-           TableName=INTERACTIONS_TABLE,                    # Environment variable: COMMONS.INTERACTIONS-TABLE
+           TableName=INTERACTIONS_TABLE,
            KeyConditionExpression='conversationId = :conversationId',
            ExpressionAttributeValues={
-               ':conversationId': {'S': conversation_id}   # DynamoDB String type
+               ':conversationId': {'S': conversation_id}
            },
-           ScanIndexForward=False,                         # Descending order (latest first)
-           Limit=1                                         # Only get the most recent interaction
+           ScanIndexForward=False,    # Descending order (latest first)
+           Limit=1                    # Only get the most recent interaction
        )
        if response.get('Items'):
-           return response['Items'][0]                     # Return the latest interaction item
-       return None                                         # No interactions found (new conversation)
+           return response['Items'][0]  # Return the latest interaction item
+       return None                      # No interactions found (new conversation)
    ```
 
-3. **Client Authorization Check** - *[conversation.py#L281-L289](../chatbot_api/services/conversation.py#L281-L289)*:
+3. **Client Authorization Check**:
+
    ```python
    if last_interaction and last_interaction.get('clientId', {}).get('S', '') != client_id:
        logger.warning(
@@ -190,9 +198,12 @@ This critical security check ensures conversation ownership and prevents unautho
    - **Error Handling**: Returns 403 Forbidden for mismatched client IDs
    - **New Conversations**: `None` result allows new conversations to proceed
 
-### **Phase 3: SessionContext Creation** - *[conversation.py#L296-L331](../chatbot_api/services/conversation.py#L296-L331)*
+### **Phase 3: SessionContext Creation**
 
-1. **SessionContext Builder Call** - *[conversation.py#L296](../chatbot_api/services/conversation.py#L296)*:
+The system builds a comprehensive SessionContext object that provides all necessary metadata for the AgentExecutor framework.
+
+1. **SessionContext Builder Call**:
+
    ```python
    session_context = self._create_session_context_builder(
        conversation_id,                           # From URL path parameter
@@ -203,7 +214,8 @@ This critical security check ensures conversation ownership and prevents unautho
    )
    ```
 
-2. **SessionContext Construction** - *[conversation.py#L327-L345](../chatbot_api/services/conversation.py#L327-L345)*:
+2. **SessionContext Construction**:
+
    ```python
    return SessionContext(
        zone_id=str(timezone.utc),
@@ -218,275 +230,235 @@ This critical security check ensures conversation ownership and prevents unautho
    )
    ```
 
-### **Phase 3: Core Execution Engine (`_execute` Method)** - *[conversation.py#L346-L616](../chatbot_api/services/conversation.py#L346-L616)*
+### **Phase 4: AgentExecutor Framework Processing**
 
-The `_execute` method is the **heart of the entire conversation system**. It orchestrates the AI processing pipeline, handles real-time streaming, and manages database persistence. This method receives the prepared `SessionContext` and `SendSaveMessageRequest` from the `process_user_input` method and executes the complete conversation workflow.
+The AgentExecutor framework is the **heart of the entire conversation system**. It orchestrates the AI processing pipeline through specialized components, handles real-time streaming via MessageProcessor, and manages dual memory persistence. This modular system receives the prepared `SessionContext` and `SendSaveMessageRequest` and executes the complete conversation workflow.
 
-#### **3.1 Method Signature & Initial Setup** - *[conversation.py#L346-L364]*
+#### **4.1 AgentExecutor Initialization**
 
 ```python
-async def _execute(
-    self,
-    session_context: SessionContext,    # Built context with IDs and metadata
-    request: SendSaveMessageRequest,    # User input and options
-) -> EventSourceResponse:              # Server-Sent Events stream
+from src.ia_mb_api_chatbot.services.agent_execution.agent_executor import AgentExecutor
+from src.ia_mb_api_chatbot.services.agent_execution.message_processor import MessageProcessor
+
+# Initialize the modular execution framework
+executor = AgentExecutor(agent_config, session_context)
+message_processor = MessageProcessor(session_context, suggestions_enabled)
 ```
 
-**Key Initialization Steps**:
+**Key Initialization Components**:
+
+- **AgentExecutor**: Core orchestration component that manages:
+  - Memory system selection (AgentCore vs DynamoDB)
+  - Tool registry setup (MCP servers, Knowledge Base)
+  - LangGraph StateGraph configuration
+  - Context assembly and validation
+
+- **MessageProcessor**: Stream handling component that manages:
+  - Dual stream processing (messages + values)
+  - Real-time delivery via Server-Sent Events
+  - Response formatting and citation processing
+  - Memory persistence coordination
+
+#### **4.2 Agent Graph Construction and Tool Integration**
+
+**Dynamic Tool Registry Setup**:
+
 ```python
-user_question = request.input.text                    # Extract user message
-is_streaming = request.input.options.stream          # Real-time streaming flag
-suggestions = request.input.options.suggestions      # Follow-up questions flag
-session_context.turn_count = int(request.context.system.turnCount) + 1  # Conversation turn tracking
-session_context.response_id = uuid.uuid4().hex       # Unique response identifier
-
-agent = Agent(self.agent_config, suggestions)        # Initialize LangGraph agent
-```
-
-#### **3.2 Conversation History Reconstruction** - *[conversation.py#L350-L370]*
-
-**Critical for Context Continuity**:
-```python
-# Load previous conversation from DynamoDB
-previous_conversation_items = service_aws.get_conversation(conversation_id=session_context.conversation_id)
-previsous_conversation = []
-
-for item in previous_conversation_items:
-    # Skip content blocked by AWS Guardrails
-    if item.get('guardrailApplied', {}).get('BOOL', False):
-        continue
-    
-    # Convert DynamoDB items to LangChain message format
-    if item.get('author', {}).get('S', '') in ['human', 'retriever']:
-        message = HumanMessage(item.get('message', {}).get('S', ''))
-    else:
-        message = AIMessage(item.get('message', {}).get('S', ''))
-    
-    previsous_conversation.append(message)
-```
-
-**Why This Matters**:
-- **Context Preservation**: AI maintains conversation memory across turns
-- **Message Chain**: Proper human/AI alternation for optimal LLM performance
-- **Security Filtering**: Excludes content blocked by guardrails from context
-- **Format Translation**: DynamoDB → LangChain message objects
-
-#### **3.3 Agent State Construction & Telemetry** - *[conversation.py#L375-L395]*
-
-**Build Complete Agent Input**:
-```python
-agent_input = {
-    'messages': [SystemMessage(PROMPT)] + previsous_conversation + [HumanMessage(user_question)],
-    'user_question': user_question,
-}
-
-# OpenTelemetry metadata for distributed tracing
-metadata = {
-    "san": {
-        "conversation_id": session_context.conversation_id,
-        "response_id": session_context.response_id,
-        "interaction_id": session_context.interaction_id,
-        "client_id": session_context.client_id,
-    }
-}
-```
-
-**Message Chain Structure**:
-1. **System Prompt**: AI behavior instructions
-2. **Conversation History**: Previous human/AI exchanges  
-3. **Current Question**: User's new input
-4. **Metadata**: Full tracing context for observability
-
-#### **3.4 Core Agent Streaming Loop** - *[conversation.py#L396-L450]*
-
-**The Central Processing Engine**:
-```python
-with capture_span_context() as capture:
-    with using_metadata(metadata):
-        async for type, value in agent.astream(
-            agent_input,
-            stream_mode=["messages", "values"]  # Stream both message chunks and node outputs
-        ):
-            # Process two types of streaming data:
-            # 1. 'messages' - Real-time text chunks for streaming
-            # 2. 'values' - Complete node outputs (contact center, deep links, etc.)
-```
-
-**Dual Stream Processing**:
-- **`type == 'values'`**: Complete outputs from LangGraph nodes (classification, retrieval, suggestions)
-- **`type == 'messages'`**: Incremental text chunks for real-time streaming
-
-#### **3.5 Multi-Modal Response Processing**
-
-**3.5.1 Contact Center Classification** - *[conversation.py#L398-L415]*:
-```python
-if not cc_answer and 'contact_center_answer' in value:
-    cc_answer = value['contact_center_answer'].answer
-    if cc_answer == 'AGENT':
-        # Immediate transfer to human agent
-        yield json.dumps(
-            SendMessageToAgentResponse.build_transfer_to_agent_response(
-                session_context=session_context
-            ).model_dump(),
-            ensure_ascii=False,
-        )
-        return  # Stop processing, transfer initiated
-```
-
-**3.5.2 Deep Links Processing** - *[conversation.py#L426-L436]*:
-```python
-if not deep_links and 'deep_links' in value and value['deep_links']:
-    deep_links = value['deep_links']
-    yield json.dumps(
-        SendMessageToAgentResponse.build_deep_links_response(
-            session_context=session_context, 
-            deeplinks=deep_links, 
-            state=state
-        ).model_dump(),
-        ensure_ascii=False,
-    )
-```
-
-**3.5.3 Suggestions Processing** - *[conversation.py#L437-L447]*:
-```python
-if not suggestions_answer and 'suggestions' in value and value['suggestions'].followup_questions:
-    suggestions_answer = value['suggestions']
-    yield json.dumps(
-        SendMessageToAgentResponse.build_suggestions_response(
-            session_context=session_context, 
-            suggestions=suggestions_answer.followup_questions, 
-            state=state
-        ).model_dump(),
-        ensure_ascii=False,
-    )
-```
-
-#### **3.6 Real-Time Text Streaming** - *[conversation.py#L451-L470]*
-
-**Content Chunking & Streaming**:
-```python
-# Extract text content from various chunk formats
-if isinstance(chunk.content, str):
-    chunk = chunk.content
-else:
-    # Handle multi-part content (e.g., text + metadata)
-    chunk = ''.join([c.get('text', '') if c.get('type','') == 'text' else '' for c in chunk.content])
-
-total_message += chunk  # Accumulate complete response
-
-# Stream only if Contact Center allows and streaming is enabled
-if self.agent_config.DisableContactCenter or cc_answer:
-    if chunk and is_streaming:
-        yield json.dumps(
-            SendMessageToAgentResponse.build_send_conversation_response(
-                chunk, session_context, DELTA_STATE
-            ).model_dump(),
-            ensure_ascii=False,
-        )
-```
-
-#### **3.7 Database Persistence Pipeline** - *[conversation.py#L473-L520]*
-
-**3.7.1 User Message Storage**:
-```python
-service_aws.create_interaction(
-    session_context=session_context,
-    message=user_question,
-    author="human",
-    span_id=span_id,  # OpenTelemetry trace ID
-    guardrail_applied=final_state.get('guardrail_applied', False)
+# Agent builds StateGraph with integrated tools
+agent_graph = executor.build_graph(
+    tools=[
+        knowledge_base_tool,     # AWS Knowledge Base for RAG
+        mcp_servers_tools,       # Model Context Protocol integrations
+        deep_link_tools,         # Navigation and routing tools
+        suggestion_tools         # Follow-up question generation
+    ],
+    memory_system=selected_memory_type  # AgentCore or DynamoDB
 )
 ```
 
-**3.7.2 Document Citations Storage**:
+**StateGraph Architecture**:
+
+1. **Input Processing**: User message validation and formatting
+2. **Memory Retrieval**: Context loading from selected memory system
+3. **Tool Orchestration**: Dynamic tool calling based on user intent
+4. **Model Invocation**: AWS Bedrock foundation model processing
+5. **Response Generation**: Structured output with citations and metadata
+
+#### **4.3 Dual Stream Processing Architecture**
+
+**MessageProcessor Stream Handling**:
+
 ```python
-documents = final_state.get('documents', [])
-if len(documents) > 0:
-    citations = []
-    document_content = ''
-    for doc in documents:
-        document_content += f"{doc.page_content}\n\n"
-        citations.append((
-            doc.metadata.get('source_metadata', {}).get('x-amz-bedrock-kb-source-uri', ''),
-            doc.metadata.get('source_metadata', {}).get('x-amz-bedrock-kb-document-page-number', 0.0)
-        ))
+# Process dual streams from agent graph execution
+async for stream_type, stream_value in agent_graph.astream(
+    agent_input,
+    stream_mode=["messages", "values"]  # Dual stream processing
+):
+    if stream_type == "messages":
+        # Real-time text chunks for streaming UI
+        await message_processor.process_message_stream(stream_value)
+    elif stream_type == "values":
+        # Complete node outputs (tools, memory, suggestions)
+        await message_processor.process_values_stream(stream_value)
+```
+
+**Stream Processing Benefits**:
+
+- **Real-time Experience**: Immediate text streaming to frontend
+- **Rich Metadata**: Tool outputs, citations, and system information
+- **Memory Integration**: Automatic persistence to selected memory system
+- **Error Recovery**: Graceful handling of processing failures
+
+### **Phase 5: Response Processing and Persistence**
+
+Once the AgentExecutor framework completes processing, the MessageProcessor handles response formatting and persistence to the dual memory system.
+
+#### **5.1 Multi-Modal Response Processing**
+
+The MessageProcessor handles different types of responses from the agent graph execution:
+
+**Contact Center Classification**: When the system determines a human agent is needed, it immediately initiates a transfer:
+
+```python
+if cc_answer == 'AGENT':
+    # Immediate transfer to human agent
+    yield transfer_to_agent_response(session_context)
+    return  # Stop processing, transfer initiated
+```
+
+**Deep Links Processing**: Navigation and routing information for UI enhancement:
+
+```python
+if deep_links:
+    yield build_deep_links_response(session_context, deep_links)
+```
+
+**Suggestions Processing**: Follow-up questions to guide conversation:
+
+```python
+if suggestions_answer and suggestions_answer.followup_questions:
+    yield build_suggestions_response(session_context, suggestions_answer)
+```
+
+#### **5.2 Real-Time Text Streaming**
+
+The MessageProcessor extracts and streams text content in real-time:
+
+```python
+# Extract text content from various chunk formats
+if isinstance(chunk.content, str):
+    chunk_text = chunk.content
+else:
+    # Handle multi-part content (text + metadata)
+    chunk_text = ''.join([
+        c.get('text', '') for c in chunk.content 
+        if c.get('type', '') == 'text'
+    ])
+
+total_message += chunk_text  # Accumulate complete response
+
+# Stream to frontend if enabled
+if chunk_text and is_streaming:
+    yield build_conversation_response(chunk_text, session_context, "DELTA")
+```
+
+#### **5.3 Memory Persistence Pipeline**
+
+The dual memory system ensures conversation persistence across both traditional and advanced memory systems:
+
+**User Message Storage**:
+
+```python
+agent_memory.save_memory(
+    session_context=session_context,
+    message=user_question,
+    author="human",
+    span_id=span_id,
+    guardrail_applied=False
+)
+```
+
+**Document Citations Storage**: When RAG retrieval occurs:
+
+```python
+if documents:
+    citations = extract_citations_from_documents(documents)
+    document_content = compile_document_content(documents)
     
     # Store retrieved documents as separate interaction
-    service_aws.create_interaction(
+    agent_memory.save_memory(
         session_context=session_context,
-        message=service_aws.apply_mask_guardrail(GUARDRAIL_MASK_ID, GUARDRAIL_MASK_VERSION, document_content),
+        message=apply_guardrail_masking(document_content),
         author="retriever",
         span_id=span_id
     )
     
     # Stream citations to client
-    yield json.dumps(
-        SendMessageToAgentResponse.build_citations_response(
-            session_context=session_context, citations=citations
-        ).model_dump(),
-        ensure_ascii=False,
-    )
+    yield build_citations_response(session_context, citations)
 ```
 
-**3.7.3 AI Response Storage**:
+**AI Response Storage**:
+
 ```python
-service_aws.create_interaction(
+agent_memory.save_memory(
     session_context=session_context,
-    message=service_aws.apply_mask_guardrail(GUARDRAIL_MASK_ID, GUARDRAIL_MASK_VERSION, total_message),
+    message=apply_guardrail_masking(total_message),
     author="ai",
     span_id=span_id,
     guardrail_applied=final_state.get('guardrail_applied', False)
 )
 ```
 
-#### **3.8 Response Finalization** - *[conversation.py#L510-L522]*
+#### **5.4 Response Finalization**
 
-**Complete Stream Closure**:
+The MessageProcessor completes the conversation flow:
+
 ```python
 # Send final response if not streaming
 if not is_streaming:
-    yield json.dumps(
-        SendMessageToAgentResponse.build_send_conversation_response(
-            total_message, session_context, DELTA_STATE
-        ).model_dump(),
-        ensure_ascii=False,
-    )
+    yield build_conversation_response(total_message, session_context, "DELTA")
 
 # Signal conversation completion
-yield json.dumps(
-    SendMessageToAgentResponse.build_send_conversation_response(
-        "", session_context, END_STATE
-    ).model_dump(),
-    ensure_ascii=False,
-)
+yield build_conversation_response("", session_context, "END")
 ```
 
-#### **3.9 Error Handling & Recovery**
+#### **5.5 Error Handling & Recovery**
 
-**Comprehensive Exception Management**:
+The AgentExecutor framework provides comprehensive exception management:
+
 ```python
+try:
+    # Agent execution and stream processing
+    async for result in executor.process_conversation():
+        yield result
 except Exception as e:
     logger.error(
-        "Error en la generación de eventos para conversationId: %s",
+        "Error in AgentExecutor processing for conversation: %s",
         session_context.conversation_id,
-        exc_info=e,
+        exc_info=e
     )
-    # Graceful degradation - stream continues with error logged
+    # Graceful degradation - continue with error response
+    yield build_error_response(session_context, str(e))
 ```
 
 **Key Design Principles**:
-- **Fail-Safe Streaming**: Errors don't crash the entire conversation
-- **Complete Telemetry**: Full error context captured
-- **Graceful Degradation**: Partial responses still delivered when possible
 
-### **Phase 4: Database Status Update Mechanism** - *[aws.py#L49-L95](../chatbot_api/services/aws.py#L49-L95)*
+- **Fail-Safe Processing**: Errors don't crash the entire conversation
+- **Complete Telemetry**: Full error context captured via OpenTelemetry
+- **Graceful Degradation**: Partial responses delivered when possible
+- **Memory Consistency**: Dual storage ensures data persistence even with failures
 
-The database persistence that occurs within the `_execute` method relies on sophisticated DynamoDB operations that maintain conversation integrity and sequence.
+### **Phase 6: Database Architecture and Storage Patterns**
 
-#### **4.1 Get Next Message ID**:
+The dual memory system (AgentCore + DynamoDB) maintains conversation integrity through sophisticated storage operations that support both traditional persistence and advanced semantic memory.
+
+#### **6.1 Message ID Sequencing**
+
+The system maintains proper message ordering through auto-incrementing message IDs:
+
 ```python
-def create_interaction(self, session_context: SessionContext, message: str, ...):
-    # Reuse get_conversation_last_interaction to maintain sequence
+def create_interaction(self, session_context: SessionContext, message: str, author: str):
+    # Get current maximum message ID for conversation
     response = self.get_conversation_last_interaction(session_context.conversation_id)
     if response:
         max_message_id = int(response['messageId']['N'])    # Get current max ID
@@ -494,57 +466,58 @@ def create_interaction(self, session_context: SessionContext, message: str, ...)
     else:
         max_message_id = 0                                  # First interaction in conversation
         topic = None
+    
+    # Create new interaction with incremented ID
+    new_message_id = max_message_id + 1
 ```
 
-#### **4.2 Build DynamoDB Item**:
+#### **6.2 DynamoDB Item Structure**
+
+The system builds comprehensive DynamoDB items with rich metadata:
+
 ```python
 item = {
     'conversationId': {'S': session_context.conversation_id},  # Partition key
-    'messageId': {'N': str(max_message_id + 1)},             # Sort key (auto-increment)
+    'messageId': {'N': str(new_message_id)},                  # Sort key (auto-increment)
     'interactionId': {'S': session_context.interaction_id},   # Unique interaction ID
-    'author': {'S': author},                                 # human, ai, retriever
-    'message': {'S': message},                               # Actual message content
-    'createdAt': {'S': datetime.now(timezone.utc).isoformat()},  # Timestamp
-    'responseId': {'S': session_context.response_id},        # Response tracking
-    'guardrailApplied': {'BOOL': guardrail_applied},         # Content safety flag
-    'sessionId': {'S': session_context.session_id}          # Session reference
+    'author': {'S': author},                                  # human, ai, retriever
+    'message': {'S': message},                                # Actual message content
+    'createdAt': {'S': datetime.now(timezone.utc).isoformat()}, # Timestamp
+    'responseId': {'S': session_context.response_id},         # Response tracking
+    'guardrailApplied': {'BOOL': guardrail_applied},          # Content safety flag
+    'sessionId': {'S': session_context.session_id}           # Session reference
 }
-```
 
-#### **4.3 Conditional Data Enrichment**:
-```python
+# Enrich with additional metadata
 if topic:
     item['topic'] = {'S': topic}                   # Preserve conversation topic
 if session_context.client_id:
     item['clientId'] = {'S': session_context.client_id}  # Client ownership
-
-# Enrich with session analytics data
-if session_context.session_id:
-    session_data = self.get_session(session_context.session_id)
-    if session_data:
-        item['browser'] = session_data['browser']    # User browser info
-        item['device'] = session_data['device']      # Device type
-        item['pageUrl'] = session_data['pageUrl']    # Source page
-        item['channel'] = session_data['channel']    # Communication channel
 ```
 
-#### **4.4 Execute Database Write**:
+#### **6.3 Dual Storage Coordination**
+
+When AgentCore memory is enabled, the system coordinates between both storage systems:
+
 ```python
-self.dynamodb.put_item(
-    TableName=INTERACTIONS_TABLE,     # COMMONS.INTERACTIONS-TABLE env var
-    Item=item                         # Complete interaction record
-)
-```
+# Primary storage to selected memory system
+await agent_memory.save_memory(session_context, message, author, span_id)
 
-## Phase 6: Complete Database Table Structure
+# Fallback/audit storage to DynamoDB
+if isinstance(agent_memory, AgentMemoryAgentCore):
+    # Also persist to DynamoDB for audit trail
+    await dynamo_service.create_interaction(session_context, message, author)
+```
 
 ### **INTERACTIONS_TABLE (Main Storage)**
 
 **Primary Key Design:**
+
 - **Partition Key**: `conversationId` - Groups all messages in one conversation
 - **Sort Key**: `messageId` - Orders messages chronologically within conversation
 
 **Complete Item Structure:**
+
 ```python
 {
     # Primary Keys
@@ -585,6 +558,7 @@ self.dynamodb.put_item(
 **Primary Key**: `sessionId` (Partition Key)
 
 **Complete Item Structure:**
+
 ```python
 {
     'sessionId': {'S': 'session-uuid'},               # Partition key
@@ -601,12 +575,14 @@ self.dynamodb.put_item(
 ### **Secondary Indexes**
 
 **clientId-conversationId-index**: For retrieving user's conversations
+
 - **Partition Key**: `clientId`
 - **Sort Key**: `conversationId`
 
 ## Query Patterns for Conversation Iterations
 
 ### **1. Get Conversation History (All Iterations)**
+
 ```python
 def get_conversation(conversation_id: str):
     response = dynamodb.query(
@@ -619,6 +595,7 @@ def get_conversation(conversation_id: str):
 ```
 
 ### **2. Get Latest Iteration (Security Check)**
+
 ```python
 def get_conversation_last_interaction(conversation_id: str):
     response = dynamodb.query(
@@ -632,6 +609,7 @@ def get_conversation_last_interaction(conversation_id: str):
 ```
 
 ### **3. Get User's Conversation List**
+
 ```python
 def get_conversations(client_id: str):
     response = dynamodb.query(
@@ -647,16 +625,19 @@ def get_conversations(client_id: str):
 ## Performance Characteristics
 
 ### **Write Patterns**
+
 - **Hot Partitions**: Active conversations get frequent writes
 - **Sequential Writes**: messageId auto-increment creates predictable access
 - **Atomic Operations**: Each message write is independent
 
 ### **Read Patterns**
+
 - **Latest First**: Security checks read most recent interaction
 - **Full History**: Conversation loading reads entire history  
 - **User Lists**: Index queries for conversation discovery
 
 ### **Scaling Considerations**
+
 ```python
 # Auto-scaling based on:
 # - Read Capacity: Conversation history requests
@@ -667,15 +648,43 @@ def get_conversations(client_id: str):
 
 ## Integration Points
 
-- **AWS Bedrock**: Foundation model inference
-- **AWS Knowledge Base**: Document retrieval for RAG
-- **AWS DynamoDB**: Conversation persistence
-- **AWS Guardrails**: Content safety validation
-- **Phoenix Telemetry**: Observability and monitoring
+The AgentExecutor framework integrates with multiple AWS and external services:
+
+- **AWS Bedrock**: Foundation model inference via AgentCore and direct API calls
+- **AWS AgentCore**: Advanced memory system with semantic search capabilities  
+- **AWS Knowledge Base**: Document retrieval for RAG through integrated tools
+- **AWS DynamoDB**: Traditional conversation persistence and audit trail
+- **AWS Guardrails**: Content safety validation through AgentGuardrails component
+- **MCP Servers**: Model Context Protocol for external tool integration
+- **Phoenix Telemetry**: Observability and monitoring via OpenTelemetry spans
 
 ## Security Features
 
-- **Header Validation**: Session and client ID verification
-- **Content Filtering**: Guardrail-based safety checks
-- **Input Sanitization**: Message content validation
-- **Span Tracking**: Request correlation for security auditing
+The system implements comprehensive security through multiple layers:
+
+- **Header Validation**: Session and client ID verification at the controller level
+- **Content Filtering**: AgentGuardrails component provides safety checks
+- **Input Sanitization**: Message content validation before processing
+- **Conversation Ownership**: Client authorization checks prevent unauthorized access
+- **Span Tracking**: Request correlation for security auditing via OpenTelemetry
+- **Memory Isolation**: Dual memory system provides data separation and fallback
+
+## Summary
+
+The `send_message_to_agent` endpoint represents a sophisticated, modular architecture that processes user messages through multiple coordinated phases:
+
+1. **Request Processing**: FastAPI validation and header extraction
+2. **Security Validation**: Client authorization and conversation ownership checks
+3. **Context Building**: Comprehensive SessionContext creation with metadata
+4. **Agent Execution**: Modular AgentExecutor framework with specialized components
+5. **Response Processing**: MessageProcessor handles streaming and multi-modal responses
+6. **Memory Persistence**: Dual storage system ensuring both advanced and traditional memory
+
+This modular design provides scalability, maintainability, and flexibility while ensuring robust conversation management and user experience. The AgentExecutor framework enables easy extension and testing of new capabilities while maintaining backward compatibility with existing storage systems.
+
+For detailed information about specific components:
+
+- **Agent Architecture**: See [LangGraph Implementation](./langgraph-implementation.md)
+- **Memory Management**: See [Memory Management Documentation](./memory-management.md)  
+- **Execution Flow**: See [Execute Method Flow](./execute-method-flow.md)
+- **Data Models**: See [Request & Response Models](./request-response-models.md)

@@ -1,49 +1,60 @@
-[← Back to Documentation Home](README.md)
-
 # Quick Start Guide
+
+[← Back to Documentation Home](README.md)
 
 ## What is IA MB API Chatbot?
 
-The IA MB API Chatbot is an enterprise-grade conversational AI system built for banking and financial services. It provides secure, intelligent customer support through a REST API, powered by AWS Bedrock and designed for high-scale production environments.
+The IA MB API Chatbot is an enterprise-grade conversational AI system built for banking and financial services. It provides secure, intelligent customer support through a modular architecture with integrated web interface, powered by AWS Bedrock and designed for high-scale production environments.
 
 ## Architecture at a Glance
 
 ```text
-Web Client → FastAPI → LangGraph Agent → AWS Bedrock → DynamoDB
-    ↑           ↑          ↑              ↑            ↑
-   UI/UX    API Layer  AI Workflow   Claude AI    Conversation
-                                                   Storage
+Integrated Frontend → FastAPI → AgentExecutor Framework → AWS Bedrock → Dual Memory System
+       ↑                ↑            ↑                      ↑              ↑
+   NiceGUI UI      API Layer   Modular Agents         Claude AI    AgentCore + DynamoDB
 ```
 
 ## Core Components
 
+### **Integrated Frontend (NiceGUI)**
+
+- **Purpose**: Built-in web interface at `/gui` path
+- **Technology**: NiceGUI framework integrated with FastAPI
+- **Features**: Real-time chat, configuration management, file upload
+- **Access**: Single-server deployment with no separate frontend needed
+
 ### **API Layer (FastAPI)**
 
 - **Purpose**: RESTful endpoints for conversation management
-- **Security**: JWT-based authentication with client isolation
-- **Performance**: Async processing with proper error handling
+- **Security**: Session-based authentication with client isolation  
+- **Performance**: Async processing with streaming responses
+- **Documentation**: Interactive Swagger UI at `/docs` path
 
-### **AI Engine (LangGraph + AWS Bedrock)**
+### **AgentExecutor Framework (Modular AI Processing)**
 
-- **Orchestration**: LangGraph manages conversation workflows
+- **Architecture**: Specialized components for different AI tasks
+- **Components**: AgentExecutor, MessageProcessor, AgentMemory, AgentGuardrails
+- **Orchestration**: LangGraph StateGraph manages conversation workflows
 - **AI Models**: Claude (Anthropic) via AWS Bedrock
-- **Safety**: AWS Guardrails for content filtering
-- **Knowledge**: RAG integration with vector databases
+- **Safety**: Integrated guardrails for content filtering
+- **Tools**: MCP servers, Knowledge Base, dynamic tool registry
 
-### **Data Storage (DynamoDB)**
+### **Dual Memory System**
 
-- **Design**: Single-table pattern for optimal performance
-- **Scale**: Auto-scaling with sub-100ms query latency
-- **Security**: Client-based row-level access control
+- **AgentCore Memory (Primary)**: Semantic search and user preference learning
+- **DynamoDB Memory (Fallback)**: Traditional conversation persistence
+- **Design**: Runtime switching between memory systems
+- **Security**: Client-based access control and data isolation
 
 ## Key Concepts
 
 ### **Conversations**
 
-- **Definition**: A sequence of messages between user and AI
+- **Definition**: A sequence of messages between user and AI managed by AgentExecutor
 - **Identification**: Unique UUID per conversation
-- **Persistence**: Messages stored with auto-increment IDs
+- **Persistence**: Messages stored in dual memory system (AgentCore + DynamoDB)
 - **Security**: Client ownership prevents cross-user access
+- **Processing**: Modular AgentExecutor framework handles message flow
 
 ### **Sessions**
 
@@ -54,10 +65,11 @@ Web Client → FastAPI → LangGraph Agent → AWS Bedrock → DynamoDB
 
 ### **Interactions**
 
-- **Definition**: Individual messages within conversations
-- **Types**: Human messages, AI responses, retriever results
-- **Storage**: DynamoDB with full conversation context
+- **Definition**: Individual messages within conversations processed by MessageProcessor
+- **Types**: Human messages, AI responses, retriever results, tool outputs
+- **Storage**: Dual storage in both AgentCore memory and DynamoDB
 - **Linking**: Response pairs connected via responseId
+- **Streaming**: Real-time delivery through Server-Sent Events
 
 ## Common Use Cases
 
@@ -135,39 +147,48 @@ PUT /conversations/{conversation_id}/topic
 
 ### **Development vs Production Authentication**
 
-| Mode | Authentication | Client ID Source | JWT Validation |
-|------|----------------|------------------|----------------|
-| **Development** | Bypassed | Hardcoded `'clientid'` | None |
-| **Production** | Full OIDC/JWT | JWT claim `username` | NGINX validation |
+| Mode | Authentication | Client ID Source | Frontend Access |
+|------|----------------|------------------|-----------------|
+| **Development** | Session-based | Header validation | Integrated at `/gui` |
+| **Production** | Full OIDC/JWT | JWT claim `username` | Integrated at `/gui` |
 
-**Important**: In development mode with integrated frontend, JWT authentication is completely bypassed for easier development and testing.
+**Important**: The system includes an integrated NiceGUI frontend at `/gui` path in both development and production modes. No separate frontend server is required.
 
-### **JWT Token Requirements (Production Only)**
+### **Session-Based Authentication (Current)**
 
 ```javascript
 // Request headers
 {
-    "Authorization": "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIsImtpZCI6...",
+    "X-LZVA-SESSION-ID": "session-uuid",
+    "X-SANTANDER-CLIENT-ID": "client-identifier", 
     "Content-Type": "application/json"
-}
-
-// Token must contain
-{
-    "sub": "client-identifier",  // Used for conversation ownership
-    "iat": 1640995200,          // Token issued time
-    "exp": 1640998800           // Token expiration
 }
 ```
 
 ### **Security Model**
 
 - **Client Isolation**: Users can only access their own conversations
-- **Conversation Ownership**: Verified on every message
-- **Content Safety**: AWS Guardrails filter harmful content
+- **Session Validation**: Headers validated on every request
+- **Conversation Ownership**: Verified through database lookup
+- **Content Safety**: AgentGuardrails component filters harmful content
+- **Memory Isolation**: Dual memory system provides data separation
 
 ## Database Schema (Simplified)
 
-### **INTERACTIONS_TABLE**
+### **Dual Memory Architecture**
+
+#### **AgentCore Memory (Primary)**
+
+```text
+Semantic Memory: User preferences and context via AWS Bedrock AgentCore
+Long-term Learning: Automated user preference detection
+Short-term Memory: Recent conversation context
+Namespace: /preferences/{actorId} for user isolation
+```
+
+#### **DynamoDB Storage (Fallback + Audit)**
+
+**INTERACTIONS_TABLE**
 
 ```text
 Primary Key: conversationId + messageId
@@ -178,7 +199,7 @@ conversationId="conv-123", messageId=1  → "Hello, I need help"
 conversationId="conv-123", messageId=2  → "I'd be happy to help you..."
 ```
 
-### **SESSIONS_TABLE**
+**SESSIONS_TABLE**
 
 ```text
 Primary Key: sessionId
@@ -227,20 +248,27 @@ uv sync
 uv run src/ia_mb_api_chatbot/run.py
 ```
 
-### **Access the Application**
+### **Access the Integrated Application**
 
-The application provides an integrated web interface:
+The application provides a complete integrated experience:
 
-- **Main UI**: `http://localhost:8082/gui` (NiceGUI-based frontend)
+- **Main UI**: `http://localhost:8082/gui` (NiceGUI-based integrated frontend)
 - **API Docs**: `http://localhost:8082/docs` (Interactive Swagger documentation)
 - **Health**: `http://localhost:8082/health`
 
-**Note**: No separate development server needed - the frontend is integrated at `/gui`.
+**Key Benefits**:
+
+- **Single Server**: No separate frontend server needed
+- **Integrated Experience**: UI, API, and documentation in one application  
+- **Real-time Features**: Server-Sent Events for streaming responses
+- **Development Simplicity**: One command starts the complete system
 
 ### **Configuration Notes**
 
-- **Parameter Store**: Configuration loads automatically from AWS Parameter Store
-- **No Manual Setup**: Database tables, models, guardrails configured in Parameter Store
+- **Parameter Store**: Configuration loads automatically from AWS Parameter Store using `ok-config`
+- **No Manual Setup**: Database tables, models, guardrails configured automatically
+- **Memory System**: AgentCore and DynamoDB dual memory configured via Parameter Store
+- **Tool Integration**: MCP servers and dynamic tool registry configured centrally
 - **JFrog Token**: Get `UV_INDEX_PRIVATE_REGISTRY_PASSWORD` from [JFrog Portal](https://gluoneurope.jfrog.io/ui/login)
 - **Token Expiration**: JFrog tokens expire every 3 months
 
@@ -267,10 +295,11 @@ GET /health/database
 
 ### **Metrics to Monitor**
 
-- **Response Time**: API endpoint latency
-- **Database Performance**: DynamoDB read/write capacity
-- **AI Processing**: Bedrock invocation success rates  
-- **Error Rates**: Failed requests by endpoint
+- **Response Time**: API endpoint latency and AgentExecutor processing time
+- **Memory Performance**: AgentCore memory retrieval and DynamoDB read/write capacity
+- **AI Processing**: Bedrock invocation success rates and AgentExecutor component health
+- **Stream Processing**: MessageProcessor performance and real-time delivery metrics
+- **Error Rates**: Failed requests by endpoint and component-level failures
 
 ## Next Steps
 
@@ -279,29 +308,32 @@ GET /health/database
 1. **Setup**: Install UV, configure AWS credentials
 2. **Backend**: `uv run src/ia_mb_api_chatbot/run.py`
 3. **Access**: Open `http://localhost:8082/gui` for the integrated frontend
-4. **Read**: [Architecture Overview](architecture-overview.md) - System design
-5. **Understand**: [Send Message Flow](send-message-flow.md) - Complete message processing and database guide
-6. **Explore**: [Database Architecture](database-architecture.md) - Data design
+4. **Read**: [Architecture Overview](architecture-overview.md) - Modular agent execution system design
+5. **Understand**: [Send Message Flow](send-message-flow.md) - Complete AgentExecutor processing flow
+6. **Explore**: [Memory Management](memory-management.md) - Dual memory system architecture
+7. **Learn**: [LangGraph Implementation](langgraph-implementation.md) - Agent framework details
 
 ### **For Operations**
 
-1. **Setup**: Configure AWS credentials and environment variables
-2. **Deploy**: Use Docker or direct Python deployment
-3. **Monitor**: Set up CloudWatch alerts and health checks
+1. **Setup**: Configure AWS credentials and Parameter Store access
+2. **Deploy**: Use Docker or direct Python deployment with integrated frontend
+3. **Monitor**: Set up CloudWatch alerts for AgentExecutor components and dual memory system
 
 ### **For Integration**
 
-1. **API Reference**: Test endpoints with provided examples
-2. **Authentication**: Implement JWT token generation
-3. **Error Handling**: Plan for network and service failures
+1. **API Reference**: Test endpoints with integrated Swagger UI at `/docs`
+2. **Authentication**: Implement session-based authentication with proper headers
+3. **Error Handling**: Plan for network failures and AgentExecutor component resilience
+4. **Memory System**: Understand dual storage pattern (AgentCore + DynamoDB)
 
 ## Support
 
 ### **Common Issues**
 
-- **AWS Credentials**: Ensure proper IAM permissions for DynamoDB and Bedrock
-- **CORS Errors**: Configure allowed origins in environment
-- **Database Errors**: Verify table names and regions match
+- **AWS Credentials**: Ensure proper IAM permissions for DynamoDB, Bedrock, and Parameter Store
+- **Memory System**: Verify AgentCore memory access and DynamoDB fallback configuration
+- **Parameter Store**: Confirm automatic parameter loading and ok-config setup
+- **Frontend Access**: Integrated UI available at `/gui` - no separate server needed
 - **Model Access**: Ensure Bedrock model access is enabled in AWS account
 
 ### **Debugging**
@@ -316,9 +348,12 @@ aws dynamodb describe-table --table-name chatbot-interactions-dev
 # Test Bedrock access
 aws bedrock list-foundation-models --region eu-west-1
 
+# Verify Parameter Store access
+aws ssm get-parameters-by-path --path "/commons" --region eu-west-1
+
 # Verify UV installation and dependencies
 uv --version
 uv tree  # Show dependency tree
 ```
 
-This guide provides everything needed to understand and start using the IA MB API Chatbot system.
+This guide provides everything needed to understand and start using the IA MB API Chatbot system with its modern AgentExecutor framework and integrated frontend.

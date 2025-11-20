@@ -1,172 +1,258 @@
-[← Back to Documentation Home](README.md)
+# Recent Architectural Changes
 
-# Recent Codebase Changes
+[← Back to Documentation Home](README.md)
 
 ## Overview
 
-This document tracks the significant changes made to the IA MB API Chatbot codebase in the latest version, including new files, moved code sections, and updated references.
+This document tracks the major architectural evolution of the IA MB API Chatbot codebase, highlighting the transition from a monolithic conversation system to a modular agent execution framework with advanced memory management capabilities.
 
-## 📁 New Files Added
+## 🏗️ **Major Architectural Evolution**
 
-### 1. **`test_api.py`** - Development Testing Server
-- **Purpose**: Simple FastAPI server for testing connectivity and basic API functionality
-- **Location**: Root directory
-- **Endpoints**: 
-  - `GET /` - Basic health check
-  - `GET /health` - Service health status  
-  - `GET /test` - Test endpoint verification
-  - `GET /docs` - Auto-generated API documentation
-- **Port**: 8082 (to avoid conflicts with main application)
-- **Usage**: Development and WSL connectivity testing
+### **Agent Execution Framework Transformation**
 
-### 2. **`scripts/discover-tables.sh`** - DynamoDB Discovery Tool
-- **Purpose**: Automated script to discover and list DynamoDB table names
-- **Features**:
-  - Environment variable detection
-  - AWS CLI integration for table listing
-  - Configuration file scanning
-  - Developer guidance for database exploration
-- **Usage**: `./scripts/discover-tables.sh`
+The codebase has undergone a significant architectural transformation from a monolithic conversation processing system to a modular agent execution framework.
 
-### 3. **`web/proxy.conf.local.json`** - Local Development Proxy
-- **Purpose**: Proxy configuration for local development environment
-- **Key Endpoints**:
-  - `/oauth/token` → External authentication service
-  - `/api` → Local backend at `localhost:8083`
-  - `/uploadsas` → External ingestion service
-  - `/docs-convassistants` → External documentation service
-- **Usage**: Angular development server proxy configuration
+#### **🔄 From Monolithic to Modular Design**
 
-## 🔄 Code Movement & Architecture Simplification
+**Before**: Single `conversation.py` with large `_execute` method handling all processing
+**After**: Specialized components in `/src/ia_mb_api_chatbot/services/agent_execution/` module
 
-### **Major Architecture Evolution: Memory System**
+**New Modular Components**:
 
-#### **🧠 New: Dual-Memory Architecture Implementation**
-- **AgentCore Memory System**: New AWS Bedrock AgentCore integration for intelligent memory management
-- **Location**: `/src/ia_mb_api_chatbot/services/agent_execution/agent_memory.py`
-- **Classes**: 
-  - `AgentMemoryAgentCore`: Semantic search and user preference learning
-  - `AgentMemoryDynamoDB`: Traditional DynamoDB-based memory (maintained for compatibility)
-  - `SaveThreadMemory`: Threaded, dual-storage memory persistence
+- **`AgentExecutor`**: Core orchestration and agent initialization
+- **`MessageProcessor`**: Stream handling and response processing  
+- **`AgentMemory`**: Memory system abstraction with dual storage support
+- **`AgentGuardrails`**: Safety and compliance checking
 
-#### **🏗️ Agent Execution Framework Modularization**
-- **New Module**: `/src/ia_mb_api_chatbot/services/agent_execution/`
-- **Components**:
-  - `AgentExecutor`: Main orchestration and initialization
-  - `MessageProcessor`: Streaming and message handling
-  - `AgentGuardrails`: Safety and compliance checking
-- **Benefits**: Clear separation of concerns, better testability, enhanced maintainability
+**Benefits**:
 
-#### **⚙️ Configuration Management Evolution**
-- **AWS Parameter Store Primary**: Configuration now loads automatically from AWS Parameter Store using `ok-config`
-- **Optional .env Override**: `.env` file now only overrides specific parameters, all others load from Parameter Store
-- **No Manual Setup Required**: Database tables, models, guardrails automatically configured via Parameter Store
-- **Parameter Store Console**: Developers can explore parameters at [AWS Parameter Store Console](https://eu-west-1.console.aws.amazon.com/systems-manager/parameters/?region=eu-west-1&tab=Table)
+- Clear separation of concerns for improved maintainability
+- Enhanced testability through isolated components
+- Better scalability and extensibility
+- Easier debugging and monitoring
 
-#### **🌐 Frontend Integration Changes**
-- **Integrated Frontend**: UI now available at `/gui` path (NiceGUI-based, not separate Angular server)
-- **Single Server**: No need for separate `ng serve` - frontend integrated into main FastAPI application
-- **API Documentation**: Available at `/docs` path (Swagger UI integrated)
-- **Static Assets**: Served at `/static/*` path
+#### **🧠 Advanced Memory System Integration**
 
-### Controller Layer (`chatbot_api/controllers/conversation.py`)
-- **`send_message_to_agent` endpoint**: Moved from **L98** → **L109** (+11 lines)
-- **⚠️ Important Discovery**: The controller is now **significantly simpler** than previously documented
-- **Current Implementation**: Pure routing layer with no business logic
-- **Architecture Change**: All validation and processing moved to service layer
+**Dual-Memory Architecture**:
 
-**Actual Current Code**:
-```python
-async def send_message_to_agent(conversation_id: str, request: SendSaveMessageRequest, 
-                               client_id: Optional[str] = Depends(get_client_id),
-                               session_id: Optional[str] = Depends(get_session_id)) -> EventSourceResponse:
-    return await conversation_service.process_user_input(client_id, session_id, conversation_id, request)
+- **AgentCore Memory (Primary)**: AWS Bedrock's advanced memory system
+  - Semantic search capabilities
+  - User preference learning
+  - Context-aware memory retrieval
+- **DynamoDB Memory (Fallback)**: Traditional persistence layer maintained for compatibility
+- **Runtime Switching**: Configurable memory system selection
+
+**Memory System Classes**:
+
+- `AgentMemoryAgentCore`: Implements semantic memory with AWS AgentCore
+- `AgentMemoryDynamoDB`: Traditional DynamoDB-based memory
+- `SaveThreadMemory`: Dual-storage memory persistence coordination
+
+#### **⚙️ Configuration Management Revolution**
+
+**AWS Parameter Store Integration**:
+
+- **Primary Configuration Source**: Automatic loading from AWS Parameter Store using `ok-config`
+- **Simplified Setup**: No manual configuration required for database tables, models, or guardrails
+- **Optional .env Override**: Local development overrides only when needed
+- **Dynamic Configuration**: Runtime parameter loading and validation
+
+**Configuration Flow**:
+
+```text
+AWS Parameter Store (Primary) → ok-config → Application Settings → Optional .env overrides
 ```
 
-### Service Layer (`chatbot_api/services/conversation.py`)  
-- **`process_user_input` method**: Moved from **L251** → **L259** (+8 lines)
-- **`_execute` method**: Moved from **L322** → **L346** (+24 lines)
-- **Business Logic**: All validation, security, and processing logic concentrated here
+#### **🌐 Integrated Frontend Architecture**
 
-### Database Interaction Points
-- **`get_conversation_last_interaction` call**: Moved from **L272** → **L280** (+8 lines)
-- **Client authorization check**: Moved from **L273-L281** → **L281-L289** (+8 lines)
+**Single-Server Design**:
 
-## 📋 Impact Assessment
+- **Integrated UI**: NiceGUI-based frontend served at `/gui` path
+- **No Separate Server**: Eliminated need for standalone Angular development server
+- **Built-in Documentation**: Swagger UI available at `/docs` path
+- **Unified Development**: Single `uv run` command starts complete application
 
-### ✅ **What Remains Unchanged**
+### **🔧 Enhanced Tool Integration**
 
-- **Core API functionality**: All endpoints work the same way
-- **Request/response models**: No changes to data structures
-- **Database schema**: Same DynamoDB table structure (enhanced, not replaced)
-- **Business logic flow**: Conversation processing logic intact
-- **LangGraph Foundation**: Core orchestration framework maintained
+**Model Context Protocol (MCP) Support**:
 
-### ⚠️ **What Changed**
+- **MCP Servers**: External tool integration via Model Context Protocol
+- **Dynamic Tool Registry**: Runtime tool loading and configuration
+- **Enhanced RAG**: Advanced Knowledge Base integration
+- **Extensible Architecture**: Easy addition of new tools and capabilities
 
-- **🆕 Configuration Source**: **Primary change** - AWS Parameter Store now primary configuration source, .env optional override only
-- **🆕 Frontend Integration**: **Major change** - UI integrated at `/gui` path, no separate Angular server needed
-- **🆕 API Documentation**: **Built-in** - Swagger UI available at `/docs` path
-- **🆕 Memory Architecture**: **Enhanced** - dual-tier memory system with AgentCore integration
-- **🆕 Agent Execution**: **Modularized** - agent execution framework for better maintainability
-- **🆕 Tool Integration**: **Enhanced** - support for MCP servers and dynamic tool registry
+## 📋 **Impact Assessment & Migration Guide**
 
-### 🛠️ **Developer Impact**
+### **✅ What Remains Stable**
 
-#### **Configuration Changes**
-- **No Manual Environment Setup**: Configuration loads automatically from Parameter Store
-- **Optional .env Override**: Only use .env for specific parameter overrides during development
-- **Parameter Exploration**: Use [AWS Parameter Store Console](https://eu-west-1.console.aws.amazon.com/systems-manager/parameters/?region=eu-west-1&tab=Table)
+**Core Functionality Preserved**:
 
-#### **Development Workflow Changes**
-- **Single Server**: Start only one server with `uv run src/ia_mb_api_chatbot/run.py`
-- **Integrated Frontend**: Access UI at `http://localhost:8082/gui` (no separate Angular server)
-- **Built-in Documentation**: API docs at `http://localhost:8082/docs`
+- **API Endpoints**: All external API contracts remain unchanged
+- **Request/Response Models**: Data structures and validation maintained
+- **Database Schema**: DynamoDB table structure preserved (enhanced, not replaced)
+- **Business Logic**: Core conversation processing flow maintained
+- **Authentication**: Session and client validation unchanged
 
-## 🛠️ Developer Actions Required
+### **🔄 What Has Evolved**
 
-### 1. **Update IDE Bookmarks**
-If you have saved line number bookmarks, update them:
-- Controller endpoint: L98 → L109
-- Main service method: L251 → L259  
-- Core execution: L322 → L346
+**Architectural Enhancements**:
 
-### 2. **Use New Development Tools**
-- **Database Discovery**: Run `./scripts/discover-tables.sh` to explore your DynamoDB tables
-- **Connectivity Testing**: Use `python test_api.py` for basic API testing
-- **Local Proxy**: Update Angular development to use `proxy.conf.local.json`
+- **🏗️ Modular Design**: Agent execution split into specialized components
+- **🧠 Advanced Memory**: Dual-tier memory system with semantic capabilities
+- **⚙️ Smart Configuration**: AWS Parameter Store integration with automatic discovery
+- **🌐 Integrated Frontend**: Single-server architecture with built-in UI
+- **🔧 Enhanced Tools**: MCP server support and dynamic tool registry
 
-### 3. **New Memory System Configuration**
+### **🛠️ Developer Migration Guide**
 
-Add these to your environment/config for AgentCore memory:
+#### **Configuration Setup**
+
+**New Configuration Flow**:
+
+```yaml
+# AWS Parameter Store (automatically loaded)
+chat:
+  use_agentcore_memory: true
+  agentcore_memory_id: "memory-123"
+agent_execution:
+  memory_fallback_enabled: true
+guardrails:
+  guardrail_mask_id: "mask-456"
+
+# .env (optional overrides only)
+ENVIRONMENT=dev
+DEBUG=true
+```
+
+**Migration Steps**:
+
+1. **Remove Manual Config**: Delete manual database/guardrail configuration
+2. **Use Parameter Store**: Configure parameters via AWS Parameter Store Console
+3. **Simplify .env**: Keep only development-specific overrides
+
+#### **Development Workflow Updates**
+
+**Single Command Development**:
+
+```bash
+# Old workflow (multiple servers)
+ng serve &
+uv run src/ia_mb_api_chatbot/run.py
+
+# New workflow (single server)
+uv run src/ia_mb_api_chatbot/run.py
+```
+
+**Access Points**:
+
+- **Application UI**: `http://localhost:8082/gui`
+- **API Documentation**: `http://localhost:8082/docs`
+- **Health Check**: `http://localhost:8082/health`
+
+#### **Memory System Configuration**
+
+**Enabling Advanced Memory**:
 
 ```yaml
 chat:
-  use_agentcore_memory: true        # Enable AgentCore memory (false = DynamoDB only)
+  use_agentcore_memory: true        # Enable AgentCore memory
   agentcore_memory_id: "memory-123" # AgentCore memory identifier
+
+# Automatic fallback to DynamoDB if AgentCore unavailable
+agent_execution:
+  memory_fallback_enabled: true
 ```
 
-### 4. **Updated Documentation References**
+### **📚 Updated Documentation**
 
-Updated documentation reflecting current architecture:
-- **[Memory Management](memory-management.md)** - **🆕 Enhanced** with dual-memory system documentation
-- **[LangGraph Implementation](langgraph-implementation.md)** - **🆕 Updated** with modular execution framework
-- **Cross-references**: All internal documentation links updated for current line numbers
+**Comprehensive Documentation Updates**:
 
-## 🎯 Migration Notes
+- **[Architecture Overview](architecture-overview.md)**: Updated with modular framework design
+- **[LangGraph Implementation](langgraph-implementation.md)**: Enhanced with agent execution details
+- **[Memory Management](memory-management.md)**: Complete dual-memory system documentation
+- **[Execute Method Flow](execute-method-flow.md)**: Updated with AgentExecutor processing flow
+- **[Send Message Flow](send-message-flow.md)**: Comprehensive flow documentation with current architecture
 
-### For Developers
-- **Debugging**: Update any debugging scripts that reference specific line numbers
-- **Code Review**: New line numbers for code review references
-- **Testing**: Leverage new `test_api.py` for development testing
+## 🔧 **Development Tools & Utilities**
 
-### For Operations  
-- **Monitoring**: No changes to runtime behavior or monitoring requirements
-- **Deployment**: No changes to deployment procedures
-- **Configuration**: No changes to environment variables or config files
+### **New Development Files**
+
+**Testing & Discovery Tools**:
+
+- **`test_api.py`**: Simple FastAPI testing server (port 8082)
+  - Basic connectivity testing
+  - Health check endpoints
+  - API documentation access
+- **`scripts/discover-tables.sh`**: DynamoDB table discovery
+  - Automatic environment detection
+  - AWS CLI integration
+  - Configuration scanning
+- **`web/proxy.conf.local.json`**: Local development proxy configuration
+  - OAuth service routing
+  - API endpoint mapping
+  - External service integration
+
+**Usage Examples**:
+
+```bash
+# Test connectivity
+python test_api.py
+
+# Discover database tables
+./scripts/discover-tables.sh
+
+# Explore AWS parameters
+open https://eu-west-1.console.aws.amazon.com/systems-manager/parameters/
+```
+
+## 🎯 **Migration Summary**
+
+### **For Developers**
+
+**Immediate Actions**:
+
+1. **Switch to Single Server**: Use `uv run src/ia_mb_api_chatbot/run.py` for complete development environment
+2. **Access Integrated UI**: Visit `http://localhost:8082/gui` for the application interface
+3. **Explore Configuration**: Review AWS Parameter Store for automatic configuration loading
+4. **Update Bookmarks**: Use new access points for documentation and testing
+
+**Benefits**:
+
+- **Simplified Development**: Single command starts complete application
+- **Enhanced Memory**: Intelligent conversation memory with semantic search
+- **Better Architecture**: Modular components improve code maintainability
+- **Integrated Tools**: MCP servers and dynamic tool registry expand capabilities
+
+### **For Operations**
+
+**Operational Continuity**:
+
+- **No Runtime Changes**: Application behavior remains consistent for end users
+- **Same Deployment**: Existing deployment procedures work unchanged
+- **Enhanced Monitoring**: Better observability through modular component separation
+- **Configuration Evolution**: Parameter Store provides centralized, secure configuration management
+
+### **Architecture Benefits**
+
+**Long-term Advantages**:
+
+- **Scalability**: Modular design enables independent component scaling
+- **Maintainability**: Separated concerns simplify debugging and feature development
+- **Extensibility**: MCP server architecture enables easy tool integration
+- **Reliability**: Dual memory system provides enhanced fault tolerance
 
 ---
 
 **Last Updated**: November 2025  
-**Version**: Current main branch  
-**Status**: ✅ Documentation fully synchronized with codebase including memory system evolution
+**Version**: Current main branch with AgentExecutor framework  
+**Status**: ✅ Complete architectural evolution with full documentation alignment
+
+## 📖 **Related Documentation**
+
+For detailed technical information about the new architecture:
+
+- **[Architecture Overview](architecture-overview.md)** - High-level system design
+- **[LangGraph Implementation](langgraph-implementation.md)** - Agent execution framework
+- **[Memory Management](memory-management.md)** - Dual memory system details
+- **[Send Message Flow](send-message-flow.md)** - Complete processing workflow
+- **[Execute Method Flow](execute-method-flow.md)** - AgentExecutor processing details

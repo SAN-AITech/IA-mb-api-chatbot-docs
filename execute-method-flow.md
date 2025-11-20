@@ -1,162 +1,224 @@
 [← Back to Documentation Home](README.md)
 
-# _execute Method Flow Analysis
+# Agent Execution Flow Analysis
 
 ## Overview
 
-The `_execute` method in `conversation.py` is the core orchestrator that processes user messages through a complex LangGraph workflow. This document provides a detailed breakdown of the flow with code references and a visual diagram.
+The agent execution system has evolved from a monolithic `_execute` method to a modular architecture with specialized components. The flow now involves `AgentExecutor` orchestration, `MessageProcessor` stream handling, and `Agent` graph execution. This document provides a detailed breakdown of the current flow with code references and visual diagrams.
 
-## Flow Diagram
+## Current Architecture Flow
 
 ```mermaid
 graph TD
-    A[_execute Method Start] --> B[Setup & Validation]
-    B --> C[Initialize Agent]
-    C --> D[Create Event Generator]
-    D --> E[Load Previous Conversation]
-    E --> F[Start LangGraph Stream]
+    A[API Request] --> B[AgentExecutor.init_executor_configuration]
+    B --> C[AgentExecutor.init_agent]
+    C --> D[MessageProcessor.stream_process]
+    D --> E[Agent.astream with dual modes]
+    E --> F[LangGraph Execution]
     
-    F --> G[agent.astream with dual modes]
-    G --> H{Async Stream Loop}
+    F --> G{Async Stream Loop}
     
     %% Dual Stream Processing
-    H -->|Each Iteration| I{Stream Type?}
+    G -->|Each Iteration| H{Stream Type?}
     
     %% Values Stream Branch
-    I -->|type == values| J[Complete Node Output]
-    J --> K{Check Content}
+    H -->|type == values| I[MessageProcessor._process_values_message]
+    I --> J{Check Content Type}
     
-    K -->|contact_center_answer| L{cc_answer == AGENT?}
-    L -->|Yes| M[yield Transfer Response]
-    M --> N[return - END ENTIRE STREAM]
-    L -->|No| O[Continue Processing]
+    J -->|contact_center_answer| K{cc_answer == AGENT?}
+    K -->|Yes| L[yield Transfer Response]
+    L --> M[return - END STREAM]
+    K -->|No| N[Continue Processing]
     
-    K -->|deep_links| P[yield Deep Links Response]
-    K -->|suggestions| Q[yield Suggestions Response]
-    K -->|documents| R[Store for Later Citations]
+    J -->|deep_links| O[yield Deep Links Response]
+    J -->|suggestions| P[yield Suggestions Response]
+    J -->|documents| Q[Process Citations & Store]
     
     %% Messages Stream Branch  
-    I -->|type == messages| S[AI Response Chunk]
-    S --> T{From chatbot node?}
-    T -->|No| U[Skip Chunk]
-    T -->|Yes| V[Extract Text Content]
-    V --> W[Accumulate in total_message]
-    W --> X{Streaming Enabled & cc_answer set?}
-    X -->|Yes| Y[yield Delta Response Chunk]
-    X -->|No| Z[Continue]
+    H -->|type == messages| R[MessageProcessor._process_message]
+    R --> S{From chatbot node?}
+    S -->|No| T[Skip Chunk]
+    S -->|Yes| U[Extract Text Content]
+    U --> V[Save to Memory]
+    V --> W{Streaming Enabled?}
+    W -->|Yes| X[yield Delta Response Chunk]
+    W -->|No| Y[Continue]
+    
+    %% Updates Stream Branch
+    H -->|type == updates| Z[MessageProcessor._process_update_message]
+    Z --> AA[Handle Node Completion]
     
     %% Loop Back
-    O --> AA[Continue Stream Loop]
-    P --> AA
-    Q --> AA
-    R --> AA
-    U --> AA
-    Y --> AA
-    Z --> AA
-    AA --> H
+    N --> BB[Continue Stream Loop]
+    O --> BB
+    P --> BB
+    Q --> BB
+    X --> BB
+    Y --> BB
+    AA --> BB
+    BB --> G
     
     %% Stream Completion
-    H -->|Stream Complete| BB[Save Human Message]
-    BB --> CC{Documents Available?}
-    CC -->|Yes| DD[Save Retriever Message]
-    CC -->|No| EE[Skip Citations]
-    DD --> FF[yield Citations Response]
-    FF --> GG[Save AI Message]
-    EE --> GG
-    GG --> HH{Non-Streaming Mode?}
-    HH -->|Yes| II[yield Final Response]
-    HH -->|No| JJ[Skip Final]
-    II --> KK[yield END State]
-    JJ --> KK
-    KK --> LL[Return EventSourceResponse]
+    G -->|Stream Complete| CC[MessageProcessor.finalize_response]
+    CC --> DD[AgentMemory.save_memory]
+    DD --> EE[return EventSourceResponse]
     
     %% Error Handling
-    H -->|Exception| MM[Log Error]
-    MM --> LL
+    G -->|Exception| FF[Log Error & Cleanup]
+    FF --> EE
     
     %% Critical Path Highlighting
     classDef criticalPath fill:#ff9999,stroke:#333,stroke-width:2px;
     classDef dualStream fill:#99ccff,stroke:#333,stroke-width:2px;
     classDef earlyTermination fill:#ffcc99,stroke:#333,stroke-width:2px;
+    classDef memoryOps fill:#ccffcc,stroke:#333,stroke-width:2px;
     
-    class L,M,N earlyTermination;
-    class I,J,S dualStream;
-    class G,H,AA criticalPath;
+    class K,L,M earlyTermination;
+    class H,I,R dualStream;
+    class G,BB criticalPath;
+    class V,DD memoryOps;
 ```
 
-### **Key Diagram Features**
+### **Key Architecture Changes**
 
-**🔄 Dual Stream Processing**: Shows how both `"values"` and `"messages"` streams are processed simultaneously in the same async loop
+**🏗️ Modular Components**: Separated orchestration (`AgentExecutor`), processing (`MessageProcessor`), and memory (`AgentMemory`)
 
-**⚡ Early Termination**: Highlights the critical `cc_answer == "AGENT"` decision that can immediately end the entire stream
+**⚡ Enhanced Streaming**: Three stream types (`messages`, `values`, `updates`) with specialized handlers
 
-**🔁 Async Loop**: Represents the `async for type, value in agent.astream()` loop that orchestrates everything
+**🧠 Memory Integration**: Dual memory system with AgentCore and DynamoDB backends
 
-**📦 Values Stream**: Complete node outputs that trigger business logic decisions
+**� Improved Error Handling**: Component-level error recovery and graceful degradation
 
-**💬 Messages Stream**: Real-time AI response chunks for streaming user experience
+**� Citation Processing**: Integrated document processing with presigned URL generation
 
-**🚨 Critical Paths**: Color-coded to show the most important decision points
+**🚨 Safety Integration**: Multi-layer guardrail system with real-time content filtering
 
-## Code Reference Map
+## Code Reference Map - Current Architecture
 
-### **Phase 1: Method Setup** - *[Lines 346-372](../chatbot_api/services/conversation.py#L346-L372)*
+### **Phase 1: AgentExecutor Initialization** - *[AgentExecutor.__init__](../src/ia_mb_api_chatbot/services/agent_execution/agent_executor.py#L25-L30)*
 
 ```python
-# conversation.py:346-372 - https://github.com/santander-group-ods/IA-mb-api-chatbot/blob/main/chatbot_api/services/conversation.py#L346-L372
-async def _execute(
+# agent_executor.py:25-30
+class AgentExecutor:
+    def __init__(self):
+        self.settings = ia_mb_api_chatbot.configuration.settings.get_settings()
+        self.service_aws = AWS()
+```
+
+**Purpose**: Initialize core services and configuration settings
+
+---
+
+### **Phase 2: Configuration Setup** - *[init_executor_configuration](../src/ia_mb_api_chatbot/services/agent_execution/agent_executor.py#L32-L55)*
+
+```python
+# agent_executor.py:32-55
+def init_executor_configuration(
     self,
-    session_context: SessionContext,
-    request: SendSaveMessageRequest,
-) -> EventSourceResponse:
-    user_question = request.input.text
-    is_streaming = request.input.options.stream
-    suggestions = request.input.options.suggestions
-    
-    # Turn count management
-    session_context.turn_count = (
-        int(request.context.system.turnCount) + 1
-        if request.context.system.turnCount
-        else 0
+    conversation_id: str,
+    client_id: Optional[str],
+    interaction_id: Optional[str],
+    session_id: str,
+    options: Options,
+    turn_count: int,
+):
+    self.session_context = SessionContext(
+        conversation_id=conversation_id,
+        client_id=client_id,
+        interaction_id=interaction_id,
+        session_id=session_id,
+        turn_count=turn_count,
+        # ... additional session parameters
     )
 ```
 
-**Purpose**: Extract request parameters and initialize session state
+**Purpose**: Set up session context and execution parameters
 
 ---
 
-### **Phase 2: Agent Initialization** - *[Lines 373-379](../chatbot_api/services/conversation.py#L373-L379)*
+### **Phase 3: Agent and Component Initialization** - *[init_agent](../src/ia_mb_api_chatbot/services/agent_execution/agent_executor.py#L65-L95)*
 
 ```python
-# conversation.py:373-379 - https://github.com/santander-group-ods/IA-mb-api-chatbot/blob/main/chatbot_api/services/conversation.py#L373-L379
-agent = Agent(self.agent_config, suggestions)
-session_context.response_id = uuid.uuid4().hex
+# agent_executor.py:65-95
+async def init_agent(self):
+    # Initialize guardrails
+    if self.settings.guardrails.use_alinia_guardrails:
+        self.agent_guardrails = AgentGuardrailsAlinia()
+    else:
+        self.agent_guardrails = AgentGuardrailsBedrock(self.service_aws)
+    
+    # Initialize memory system
+    if self.settings.chat.use_agentcore_memory:
+        self.agent_memory = AgentMemoryAgentCore(...)
+    else:
+        self.agent_memory = AgentMemoryDynamoDB(...)
+    
+    # Create agent and message processor
+    tracer_provider = TracerProvider()
+    self.agent = Agent(self.suggestions, tracer_provider, self.agent_guardrails)
+    await self.agent.init_llm_models()
+    
+    self.message_processor = MessageProcessor(...)
 ```
 
-**Purpose**: Create LangGraph agent with configuration and generate unique response ID
+**Purpose**: Initialize all execution components with proper configuration
 
 ---
 
-### **Phase 3: Event Generator Setup** - *[Lines 381-409](../chatbot_api/services/conversation.py#L381-L409)*
+### **Phase 4: Stream Processing** - *[MessageProcessor.stream_process](../src/ia_mb_api_chatbot/services/agent_execution/message_processor.py#L160-L175)*
 
 ```python
-# conversation.py:381-409 - https://github.com/santander-group-ods/IA-mb-api-chatbot/blob/main/chatbot_api/services/conversation.py#L381-L409
-async def event_generator():
-    try:
-        # Initialize response tracking variables
-        total_message = ""
-        cc_answer = None
-        deep_links = None
-        suggestions_answer = None
-        final_state = None
-        span_id = None
-        initial_message_sent = False
-        
-        # Load conversation history
-        previous_conversation_items = service_aws.get_conversation(
-            conversation_id=session_context.conversation_id
-        )
+# message_processor.py:160-175
+async for message_type, value in self.agent.astream(
+    {
+        "messages": [SystemMessage(prompt)] + previous_conversation + [HumanMessage(user_question)],
+        "user_question": user_question,
+    },
+    stream_mode=self.stream_mode,
+):
+    if message_type == "updates":
+        await self._process_update_message(value)
+    elif message_type == "values" and isinstance(value, dict):
+        async for message in self._process_values_message(value):
+            yield message
+    elif isinstance(value, tuple):
+        async for message in self._process_message(value):
+            yield message
 ```
+
+**Purpose**: Orchestrate dual stream processing with specialized handlers
+
+---
+
+### **Phase 5: Values Stream Processing** - *[_process_values_message](../src/ia_mb_api_chatbot/services/agent_execution/message_processor.py#L195-L250)*
+
+```python
+# message_processor.py:195-250
+async def _process_values_message(self, value: dict) -> AsyncGenerator[str]:
+    # Handle contact center detection
+    if "contact_center_answer" in value:
+        cc_answer = value["contact_center_answer"]
+        if cc_answer and cc_answer.answer == "AGENT":
+            # Immediate transfer - end stream
+            yield json.dumps(SendMessageToAgentResponse.build_transfer_response(...))
+            self.finished = True
+            return
+    
+    # Handle deep links
+    if "deep_links" in value and value["deep_links"]:
+        yield json.dumps(SendMessageToAgentResponse.build_deep_links_response(...))
+    
+    # Handle suggestions
+    if "suggestions" in value and value["suggestions"]:
+        yield json.dumps(SendMessageToAgentResponse.build_suggestions_response(...))
+    
+    # Handle documents for citations
+    if "documents" in value:
+        async for message in self._process_documents(value["documents"]):
+            yield message
+```
+
+**Purpose**: Process complete node outputs for business logic decisions and metadata
 
 **Purpose**: Set up streaming response generator and load conversation context
 

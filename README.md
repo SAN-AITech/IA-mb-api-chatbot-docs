@@ -44,6 +44,7 @@
 
 - **[Development Guide](development-guide.md)** - Local setup and development workflow
 - **[Testing Strategy](testing-strategy.md)** - Testing approach and best practices
+- **[OkConfigSettings Usage](ok-config-usage.md)** - Configuration management and local development setup
 
 ## Legacy Documents
 
