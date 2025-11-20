@@ -94,15 +94,34 @@ AGENT_CONFIG='{"MCPServers": ["localhost:3000"]}'
 FUNDATION_MODEL=local-model
 ```
 
-## Using in Other Projects
+## Using in Other Santander Projects
 
-### Step 1: Install Required Package
+### Step 1: Configure Private Registry Access
 
-```bash
-pip install ia-common-libs
+Add Santander's internal PyPI registry to your `pyproject.toml`:
+
+```toml
+# pyproject.toml
+[[tool.uv.index]]
+name = "private-registry"
+url = "https://gluoneurope.jfrog.io/artifactory/api/pypi/ods-pypi-public/simple"
+publish-url = "https://gluoneurope.jfrog.io/artifactory/api/pypi/ods-pypi-releases"
 ```
 
-### Step 2: Create Configuration Structure  
+### Step 2: Add Dependency
+
+Include `ia-common-libs` in your project dependencies:
+
+```toml
+# pyproject.toml
+[project]
+dependencies = [
+    "ia-common-libs==0.4.3",
+    # your other dependencies...
+]
+```
+
+### Step 3: Create Configuration Structure  
 
 ```python
 # your_project/config/settings.py
@@ -130,7 +149,7 @@ def get_settings() -> AppSettings:
     return AppSettings()
 ```
 
-### Step 3: Configure AWS Parameter Store
+### Step 4: Configure AWS Parameter Store
 
 Set parameters following the naming pattern:
 
@@ -141,7 +160,7 @@ Set parameters following the naming pattern:
 /config/{your-service}_{environment}/api_key
 ```
 
-### Step 4: Use Configuration in Code
+### Step 5: Use Configuration in Code
 
 ```python
 # your_service.py
@@ -154,7 +173,7 @@ class YourService:
         self.api_url = settings.api.base_url
 ```
 
-### Step 5: Local Development Setup
+### Step 6: Local Development Setup
 
 Create `env/local.yaml` for local testing:
 
@@ -204,12 +223,14 @@ def test_local_config():
 
 ## Summary
 
-OkConfigSettings provides **simple, powerful configuration management**:
+OkConfigSettings provides **simple, powerful configuration management** for Santander internal projects:
 
-1. **Inherit from `OkConfigSettings`** for any configuration class
-2. **Use `@lru_cache`** for a singleton settings function  
-3. **AWS Parameter Store** for production configuration
-4. **`env/local.yaml`** for local development overrides
-5. **Type-safe access** to all configuration values
+1. **Configure private registry** access in your `pyproject.toml`
+2. **Add `ia-common-libs` dependency** to your project
+3. **Inherit from `OkConfigSettings`** for any configuration class
+4. **Use `@lru_cache`** for a singleton settings function  
+5. **AWS Parameter Store** for production configuration
+6. **`env/local.yaml`** for local development overrides
+7. **Type-safe access** to all configuration values
 
-This pattern eliminates environment-specific code and enables seamless local development.
+This pattern eliminates environment-specific code and enables seamless local development across Santander's internal project ecosystem. See **[Development Guide](development-guide.md)** for local setup details and **[AWS Integration Guide](aws-integration.md)** for production configuration patterns.
